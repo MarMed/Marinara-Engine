@@ -34,7 +34,7 @@ import { useGenerate } from "../../hooks/use-generate";
 import { useCharacters, usePersonas } from "../../hooks/use-characters";
 import { useConnections } from "../../hooks/use-connections";
 import { usePageActivity } from "../../hooks/use-page-activity";
-import { api } from "../../lib/api-client";
+import { api, ApiError } from "../../lib/api-client";
 import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { getChatDisplayName, getConnectedChatDisplayName, parseChatMetadata } from "../../lib/chat-display";
 import { parseCharacterDisplayData } from "../../lib/character-display";
@@ -62,6 +62,7 @@ import { ttsService } from "../../lib/tts-service";
 import { useTTSConfig } from "../../hooks/use-tts";
 import { buildTTSMessageText, resolveTTSVoiceForSpeaker } from "../../lib/tts-dialogue";
 import { mirrorSpritePlacements, normalizeSpritePlacements } from "./sprite-placement";
+import { normalizeSpriteDisplayModes } from "./sprite-display-modes";
 import type { CharacterMap, MessageSelectionToggle, MessageWithSwipes, PeekPromptData } from "./chat-area.types";
 import { RecentChats } from "./RecentChats";
 import { HomeFaq } from "./HomeFaq";
@@ -165,7 +166,7 @@ export function ChatArea() {
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [selectionAnchorIndex, setSelectionAnchorIndex] = useState<number | null>(null);
 
-  const { data: chat } = useChat(activeChatId);
+  const { data: chat, error: chatError } = useChat(activeChatId);
   const { data: allChats } = useChats();
   // Game mode loads ALL messages (no pagination) so the in-game log
   // shows the full session history instead of only the latest page.
@@ -225,6 +226,11 @@ export function ChatArea() {
   const pendingNewChatMode = useChatStore((s) => s.pendingNewChatMode);
   const failedAgentTypes = useAgentStore((s) => s.failedAgentTypes);
   const agentProcessing = useAgentStore((s) => s.isProcessing);
+
+  useEffect(() => {
+    if (!activeChatId || !(chatError instanceof ApiError) || chatError.status !== 404) return;
+    setActiveChatId(null);
+  }, [activeChatId, chatError, setActiveChatId]);
 
   useEffect(() => {
     const handleReviewRequest = (event: Event) => {
@@ -404,6 +410,7 @@ export function ChatArea() {
     return parseChatMetadata(raw);
   }, [chat]);
   const spriteCharacterIds: string[] = Array.isArray(chatMeta.spriteCharacterIds) ? chatMeta.spriteCharacterIds : [];
+  const spriteDisplayModes = normalizeSpriteDisplayModes(chatMeta.spriteDisplayModes);
   const spritePosition: SpriteSide = chatMeta.spritePosition === "right" ? "right" : "left";
   const spriteScale = normalizeSpriteDisplayValue(chatMeta.spriteScale, roleplaySpriteScale, 0.5, 1.75);
   const spriteOpacity = normalizeSpriteDisplayValue(chatMeta.spriteOpacity, 1, 0.15, 1);
@@ -1875,6 +1882,7 @@ export function ChatArea() {
           encounterActive={encounterActive}
           spritePosition={spritePosition}
           spriteCharacterIds={spriteCharacterIds}
+          spriteDisplayModes={spriteDisplayModes}
           spriteExpressions={spriteExpressions}
           spritePlacements={spritePlacements}
           spriteScale={spriteScale}

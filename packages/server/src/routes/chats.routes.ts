@@ -12,6 +12,7 @@ import {
   nameToXmlTag,
   resolveMacros,
   summariesPatchSchema,
+  coerceGameStateTextValue,
 } from "@marinara-engine/shared";
 import type { CharacterData, ChatMemoryChunk, GameNpc, LorebookEntryTimingState } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
@@ -901,20 +902,20 @@ export async function chatsRoutes(app: FastifyInstance) {
         : null;
     const hasExplicitTarget = targetMessageId !== null && targetSwipeIndex !== null;
     const fields: Partial<{
-      date: string;
-      time: string;
-      location: string;
-      weather: string;
-      temperature: string;
+      date: string | null;
+      time: string | null;
+      location: string | null;
+      weather: string | null;
+      temperature: string | null;
       presentCharacters: any[];
       playerStats: any;
       personaStats: any[];
     }> = {};
-    if (body.date !== undefined) fields.date = body.date as string;
-    if (body.time !== undefined) fields.time = body.time as string;
-    if (body.location !== undefined) fields.location = body.location as string;
-    if (body.weather !== undefined) fields.weather = body.weather as string;
-    if (body.temperature !== undefined) fields.temperature = body.temperature as string;
+    if (body.date !== undefined) fields.date = coerceGameStateTextValue(body.date);
+    if (body.time !== undefined) fields.time = coerceGameStateTextValue(body.time);
+    if (body.location !== undefined) fields.location = coerceGameStateTextValue(body.location);
+    if (body.weather !== undefined) fields.weather = coerceGameStateTextValue(body.weather);
+    if (body.temperature !== undefined) fields.temperature = coerceGameStateTextValue(body.temperature);
     if (body.presentCharacters !== undefined) fields.presentCharacters = body.presentCharacters as any[];
     if (body.playerStats !== undefined) fields.playerStats = body.playerStats;
     if (body.personaStats !== undefined) fields.personaStats = body.personaStats as any[];
@@ -962,7 +963,8 @@ export async function chatsRoutes(app: FastifyInstance) {
       const manualOverrides: Record<string, string> = {};
       const TRACKABLE = ["date", "time", "location", "weather", "temperature"] as const;
       for (const key of TRACKABLE) {
-        if (fields[key] !== undefined) manualOverrides[key] = fields[key] as string;
+        const text = coerceGameStateTextValue(fields[key]);
+        if (text) manualOverrides[key] = text;
       }
       await gameStateStore.create(
         {

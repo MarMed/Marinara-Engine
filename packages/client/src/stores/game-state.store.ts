@@ -2,7 +2,7 @@
 // Zustand Store: Game State Slice (RPG Companion)
 // ──────────────────────────────────────────────
 import { create } from "zustand";
-import type { GameState } from "@marinara-engine/shared";
+import { coerceGameStateTextFields, type GameState } from "@marinara-engine/shared";
 
 interface GameStateStore {
   current: GameState | null;
@@ -24,6 +24,11 @@ interface GameStateStore {
 }
 
 const flushPatchCallbacks = new Map<string, () => Promise<void>>();
+
+function normalizeGameState(state: GameState | null): GameState | null {
+  if (!state) return null;
+  return { ...state, ...coerceGameStateTextFields(state as unknown as Record<string, unknown>) };
+}
 
 function buildFlushPatch() {
   if (flushPatchCallbacks.size === 0) return null;
@@ -49,7 +54,7 @@ export const useGameStateStore = create<GameStateStore>((set) => ({
 
   setGameState: (state) =>
     set((currentStore) => ({
-      current: state,
+      current: normalizeGameState(state),
       isRefreshing: currentStore.refreshingChatId !== null && currentStore.refreshingChatId === state?.chatId,
     })),
   setVisible: (visible) => set({ isVisible: visible }),

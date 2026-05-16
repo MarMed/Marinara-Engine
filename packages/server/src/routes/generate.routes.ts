@@ -16,6 +16,7 @@ import {
   LOCAL_SIDECAR_CONNECTION_ID,
   resolveMacros,
   LIMITS,
+  coerceGameStateTextValue,
 } from "@marinara-engine/shared";
 import type {
   AgentContext,
@@ -41,6 +42,7 @@ import { createRegexScriptsStorage } from "../services/storage/regex-scripts.sto
 import { applyRegexScriptsToPromptMessages } from "../services/regex/regex-application.js";
 import { createPromptOverridesStorage } from "../services/storage/prompt-overrides.storage.js";
 import { loadPrompt, CONVERSATION_SELFIE } from "../services/prompt-overrides/index.js";
+import { renderTemplate } from "../services/prompt-overrides/template.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import {
   filterGameInternalAgentIds,
@@ -74,7 +76,7 @@ import { executeToolCalls, type MetadataPatchInput } from "../services/tools/too
 import { createAgentPipeline, type ResolvedAgent, type AgentInjection } from "../services/agents/agent-pipeline.js";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
-import { buildSpriteExpressionChoices, listCharacterSprites } from "../services/game/sprite.service.js";
+import { listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
 import { sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
@@ -155,7 +157,11 @@ import {
   type PromptAttachment,
   type SimpleMessage,
 } from "./generate/generate-route-utils.js";
-import { validateSpriteExpressionEntries } from "./generate/expression-agent-utils.js";
+import {
+  buildAvailableSpriteCharacter,
+  normalizeSpriteDisplayModes,
+  validateSpriteExpressionEntries,
+} from "./generate/expression-agent-utils.js";
 import { logger, logDebugOverride } from "../lib/logger.js";
 import {
   buildHistoricalLorebookKeeperContext,
@@ -253,6 +259,12 @@ function getEnabledConversationSchedules(meta: Record<string, any>): Record<stri
   return areConversationSchedulesEnabled(meta) && hasConversationSchedules(meta.characterSchedules)
     ? meta.characterSchedules
     : {};
+}
+
+function getChatHapticIntifaceUrl(meta: Record<string, unknown>): string | undefined {
+  const url = meta.hapticIntifaceUrl;
+  if (typeof url !== "string") return undefined;
+  return url.trim() || undefined;
 }
 
 function normalizeHapticAgentAction(action: unknown): HapticDeviceCommand["action"] | null {
@@ -2244,7 +2256,7 @@ export async function generateRoutes(app: FastifyInstance) {
             // Auto-connect to Intiface Central if not already connected
             if (!hapticService.connected) {
               try {
-                await hapticService.connect();
+                await hapticService.connect(getChatHapticIntifaceUrl(chatMeta));
               } catch {
                 logger.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
               }
@@ -4321,21 +4333,31 @@ export async function generateRoutes(app: FastifyInstance) {
       // If the expression agent is enabled, load available sprite expressions per character
       if (resolvedAgents.some((a) => a.type === "expression")) {
         try {
+          const spriteDisplayModes = normalizeSpriteDisplayModes(chatMeta.spriteDisplayModes);
+          const selectedSpriteIds = new Set(
+            Array.isArray(chatMeta.spriteCharacterIds)
+              ? chatMeta.spriteCharacterIds.filter((id): id is string => typeof id === "string")
+              : [],
+          );
+          const restrictToSelectedSprites = selectedSpriteIds.size > 0;
           const perChar: Array<{
             characterId: string;
             characterName: string;
             expressions: string[];
-            expressionChoices: string[];
+            expressionChoices?: string[];
           }> = [];
           for (const char of agentContext.characters) {
+            if (restrictToSelectedSprites && !selectedSpriteIds.has(char.id)) continue;
             const sprites = listCharacterSprites(char.id);
-            if (sprites && sprites.expressions.length > 0) {
-              perChar.push({
-                characterId: char.id,
-                characterName: char.name,
-                expressions: sprites.expressions,
-                expressionChoices: buildSpriteExpressionChoices(sprites.expressions),
-              });
+            if (!sprites) continue;
+            const spriteCharacter = buildAvailableSpriteCharacter(char.id, char.name, sprites, spriteDisplayModes);
+            if (spriteCharacter) perChar.push(spriteCharacter);
+          }
+          if (personaId && (!restrictToSelectedSprites || selectedSpriteIds.has(personaId))) {
+            const sprites = listCharacterSprites(personaId);
+            if (sprites) {
+              const spritePersona = buildAvailableSpriteCharacter(personaId, personaName, sprites, spriteDisplayModes);
+              if (spritePersona) perChar.push(spritePersona);
             }
           }
           if (perChar.length > 0) {
@@ -4391,7 +4413,7 @@ export async function generateRoutes(app: FastifyInstance) {
           // Auto-connect to Intiface Central if not already connected
           if (!hapticService.connected) {
             try {
-              await hapticService.connect();
+              await hapticService.connect(getChatHapticIntifaceUrl(chatMeta));
             } catch {
               logger.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
             }
@@ -7403,11 +7425,13 @@ export async function generateRoutes(app: FastifyInstance) {
                 (allowLatestGameStateFallback ? await gameStateStore.getLatest(input.chatId) : null);
 
               // Build the new snapshot from agent output, falling back to previous snapshot.
-              const newDate = (gs.date as string) ?? (prevSnap?.date as string | null) ?? null;
-              const newTime = (gs.time as string) ?? (prevSnap?.time as string | null) ?? null;
-              const newLocation = (gs.location as string) ?? (prevSnap?.location as string | null) ?? null;
-              const newWeather = (gs.weather as string) ?? (prevSnap?.weather as string | null) ?? null;
-              const newTemperature = (gs.temperature as string) ?? (prevSnap?.temperature as string | null) ?? null;
+              const newDate = coerceGameStateTextValue(gs.date) ?? coerceGameStateTextValue(prevSnap?.date);
+              const newTime = coerceGameStateTextValue(gs.time) ?? coerceGameStateTextValue(prevSnap?.time);
+              const newLocation =
+                coerceGameStateTextValue(gs.location) ?? coerceGameStateTextValue(prevSnap?.location);
+              const newWeather = coerceGameStateTextValue(gs.weather) ?? coerceGameStateTextValue(prevSnap?.weather);
+              const newTemperature =
+                coerceGameStateTextValue(gs.temperature) ?? coerceGameStateTextValue(prevSnap?.temperature);
 
               // The world-state agent ONLY produces date/time/location/weather/temperature
               // (and optionally recentEvents).  In batch mode the model often cross-
@@ -8530,6 +8554,8 @@ export async function generateRoutes(app: FastifyInstance) {
                         ? chatMeta.selfiePositivePrompt.trim()
                         : selfieTags.join(", ").trim();
                     const selfieNegativePrompt = ((chatMeta.selfieNegativePrompt as string) ?? "").trim();
+                    const selfiePromptTemplate =
+                      typeof chatMeta.selfiePrompt === "string" ? chatMeta.selfiePrompt.trim() : "";
                     const promptBuilder = createLLMProvider(
                       conn.provider,
                       baseUrl,
@@ -8538,15 +8564,18 @@ export async function generateRoutes(app: FastifyInstance) {
                       conn.openrouterProvider,
                       conn.maxTokensOverride,
                     );
-                    const selfieSystemPrompt = await loadPrompt(
-                      createPromptOverridesStorage(app.db),
-                      CONVERSATION_SELFIE,
-                      {
-                        appearance,
-                        charName,
-                        selfieTagsBlock: "",
-                      },
-                    );
+                    const selfiePromptContext = {
+                      appearance,
+                      charName,
+                      selfieTagsBlock: "",
+                    };
+                    const selfieSystemPrompt = selfiePromptTemplate
+                      ? renderTemplate(
+                          selfiePromptTemplate,
+                          selfiePromptContext,
+                          CONVERSATION_SELFIE.variables.map((variable) => variable.name),
+                        )
+                      : await loadPrompt(createPromptOverridesStorage(app.db), CONVERSATION_SELFIE, selfiePromptContext);
                     const promptResult = await promptBuilder.chatComplete(
                       [
                         {
