@@ -420,6 +420,8 @@ interface GameNarrationProps {
   onNpcPortraitClick?: (npcName: string) => void;
   /** Generate or replace a tracked NPC portrait through the image provider. */
   onNpcPortraitGenerate?: (npcName: string) => void;
+  /** Notify the parent that a tracked NPC portrait URL failed to load. */
+  onNpcPortraitLoadError?: (npcName: string) => void;
   npcPortraitGenerationEnabled?: boolean;
   generatingNpcPortraitNames?: Set<string>;
   /** Pause auto-play while a blocking game overlay is open. */
@@ -901,6 +903,7 @@ export function GameNarration({
   onReadable,
   onNpcPortraitClick,
   onNpcPortraitGenerate,
+  onNpcPortraitLoadError,
   npcPortraitGenerationEnabled = false,
   generatingNpcPortraitNames,
   autoPlayBlocked,
@@ -3589,6 +3592,11 @@ export function GameNarration({
                                 alt={active.speaker || ""}
                                 crop={activeAvatar.crop}
                                 className={cn(GAME_DIALOGUE_AVATAR_CLASS, "transition-colors hover:border-white/30")}
+                                onLoadError={
+                                  activeCanGeneratePortrait && active.speaker
+                                    ? () => onNpcPortraitLoadError?.(active.speaker as string)
+                                    : undefined
+                                }
                               />
                             ) : (
                               <img
@@ -3630,6 +3638,11 @@ export function GameNarration({
                           alt={active.speaker || ""}
                           crop={activeAvatar.crop}
                           className={GAME_DIALOGUE_AVATAR_CLASS}
+                          onLoadError={
+                            activeCanGeneratePortrait && active.speaker
+                              ? () => onNpcPortraitLoadError?.(active.speaker as string)
+                              : undefined
+                          }
                         />
                       ) : (
                         <img
@@ -4497,6 +4510,11 @@ export function GameNarration({
                                       alt={seg.speaker || ""}
                                       crop={logAvatar.crop}
                                       className="h-8 w-8 rounded-lg border border-white/10 transition-colors hover:border-white/25"
+                                      onLoadError={
+                                        canGenerateLogPortrait && seg.speaker
+                                          ? () => onNpcPortraitLoadError?.(seg.speaker as string)
+                                          : undefined
+                                      }
                                     />
                                   ) : (
                                     <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-[var(--accent)] text-[0.5rem] font-bold transition-colors hover:border-white/25">
@@ -4533,6 +4551,11 @@ export function GameNarration({
                                 alt={seg.speaker || ""}
                                 crop={logAvatar.crop}
                                 className="h-8 w-8 shrink-0 rounded-lg border border-white/10"
+                                onLoadError={
+                                  canGenerateLogPortrait && seg.speaker
+                                    ? () => onNpcPortraitLoadError?.(seg.speaker as string)
+                                    : undefined
+                                }
                               />
                             ) : (
                               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-[var(--accent)] text-[0.5rem] font-bold">
@@ -4684,15 +4707,23 @@ function CroppedAvatar({
   alt,
   crop,
   className,
+  onLoadError,
 }: {
   src: string;
   alt: string;
   crop?: AvatarCrop | LegacyAvatarCrop | null;
   className?: string;
+  onLoadError?: () => void;
 }) {
   return (
     <div className={cn("relative overflow-hidden", className)}>
-      <img src={src} alt={alt} className="h-full w-full object-cover" style={getAvatarCropStyle(crop)} />
+      <img
+        src={src}
+        alt={alt}
+        className="h-full w-full object-cover"
+        style={getAvatarCropStyle(crop)}
+        onError={onLoadError}
+      />
     </div>
   );
 }

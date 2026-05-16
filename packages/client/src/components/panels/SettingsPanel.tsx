@@ -3656,7 +3656,7 @@ function AdvancedSettings() {
                 label: "Guide reply",
                 checked: showQuickReplyGuide,
                 onChange: setShowQuickReplyGuide,
-                description: "Use draft as /narrator direction.",
+                description: "Use draft as /guided direction.",
                 icon: WandSparkles,
               },
               {

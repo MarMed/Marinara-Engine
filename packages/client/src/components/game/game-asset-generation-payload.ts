@@ -24,6 +24,7 @@ type MissingSceneAssetGenerationInput = {
   sceneAssetNpcs: SceneAssetNpcAvatarCandidate[];
   npcAvatarLookup: Map<string, string>;
   npcsNeedingAvatars: Array<{ name: string; description: string }>;
+  failedNpcAvatarNames?: Iterable<string>;
 };
 
 export function normalizeSceneAssetNameForGeneration(value: string): string {
@@ -49,6 +50,7 @@ export function buildMissingSceneAssetGenerationPayload({
   sceneAssetNpcs,
   npcAvatarLookup,
   npcsNeedingAvatars,
+  failedNpcAvatarNames,
 }: MissingSceneAssetGenerationInput): MissingSceneAssetGenerationPayload | null {
   if (!gameImageGenerationEnabled) return null;
   if (!activeChatId) return null;
@@ -62,13 +64,38 @@ export function buildMissingSceneAssetGenerationPayload({
     .filter((npc) => npc.description && npc.name)
     .map((npc) => ({ name: npc.name, description: npc.description }))
     .slice(0, 10);
-  const forceNpcAvatarNames = savedGeneratedBackgroundMissing
-    ? npcAssetCandidates
-        .filter((npc) => npcAvatarLookup.has(normalizeSceneAssetNameForGeneration(npc.name)))
-        .map((npc) => npc.name)
-    : [];
+  const forceNpcAvatarNameSet = new Set<string>();
+  if (savedGeneratedBackgroundMissing) {
+    for (const npc of npcAssetCandidates) {
+      if (npcAvatarLookup.has(normalizeSceneAssetNameForGeneration(npc.name))) {
+        forceNpcAvatarNameSet.add(npc.name);
+      }
+    }
+  }
+  const failedNpcAvatarNameSet = new Set(
+    [...(failedNpcAvatarNames ?? [])].map(normalizeSceneAssetNameForGeneration).filter(Boolean),
+  );
+  for (const npc of npcAssetCandidates) {
+    if (failedNpcAvatarNameSet.has(normalizeSceneAssetNameForGeneration(npc.name))) {
+      forceNpcAvatarNameSet.add(npc.name);
+    }
+  }
+  const forceNpcAvatarNames = [...forceNpcAvatarNameSet];
+  const forcedNpcPayload = npcAssetCandidates.filter((npc) => forceNpcAvatarNameSet.has(npc.name));
   const npcPayload =
-    savedGeneratedBackgroundMissing && forceNpcAvatarNames.length > 0 ? npcAssetCandidates : npcsNeedingAvatars;
+    savedGeneratedBackgroundMissing && forceNpcAvatarNames.length > 0
+      ? npcAssetCandidates
+      : [
+          ...npcsNeedingAvatars,
+          ...forcedNpcPayload.filter(
+            (forcedNpc) =>
+              !npcsNeedingAvatars.some(
+                (npc) =>
+                  normalizeSceneAssetNameForGeneration(npc.name) ===
+                  normalizeSceneAssetNameForGeneration(forcedNpc.name),
+              ),
+          ),
+        ].slice(0, 10);
 
   if (!unresolvedBackground && npcPayload.length === 0) return null;
 

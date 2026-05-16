@@ -5,11 +5,21 @@ import { eq, and, ne, desc, inArray } from "drizzle-orm";
 import type { DB } from "../../db/connection.js";
 import { gameStateSnapshots } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
-import type { GameState } from "@marinara-engine/shared";
+import { coerceGameStateTextValue, type GameState } from "@marinara-engine/shared";
 
 export type GameStateVisibleAnchor = { messageId: string; swipeIndex: number };
 
 const MANUAL_OVERRIDE_FIELDS = ["date", "time", "location", "weather", "temperature"] as const;
+
+function coerceSnapshotTextFields(fields: Partial<Pick<GameState, (typeof MANUAL_OVERRIDE_FIELDS)[number]>>) {
+  return {
+    date: coerceGameStateTextValue(fields.date),
+    time: coerceGameStateTextValue(fields.time),
+    location: coerceGameStateTextValue(fields.location),
+    weather: coerceGameStateTextValue(fields.weather),
+    temperature: coerceGameStateTextValue(fields.temperature),
+  };
+}
 
 export function createGameStateStorage(db: DB) {
   return {
@@ -191,11 +201,7 @@ export function createGameStateStorage(db: DB) {
         chatId: state.chatId,
         messageId: state.messageId,
         swipeIndex: state.swipeIndex,
-        date: state.date,
-        time: state.time,
-        location: state.location,
-        weather: state.weather,
-        temperature: state.temperature,
+        ...coerceSnapshotTextFields(state),
         presentCharacters: JSON.stringify(state.presentCharacters),
         recentEvents: JSON.stringify(state.recentEvents),
         playerStats: state.playerStats ? JSON.stringify(state.playerStats) : null,
@@ -280,11 +286,11 @@ export function createGameStateStorage(db: DB) {
         chatId,
         messageId,
         swipeIndex,
-        date: (latest?.date as string) ?? null,
-        time: (latest?.time as string) ?? null,
-        location: (latest?.location as string) ?? null,
-        weather: (latest?.weather as string) ?? null,
-        temperature: (latest?.temperature as string) ?? null,
+        date: coerceGameStateTextValue(latest?.date),
+        time: coerceGameStateTextValue(latest?.time),
+        location: coerceGameStateTextValue(latest?.location),
+        weather: coerceGameStateTextValue(latest?.weather),
+        temperature: coerceGameStateTextValue(latest?.temperature),
         presentCharacters: latest?.presentCharacters
           ? typeof latest.presentCharacters === "string"
             ? JSON.parse(latest.presentCharacters)
@@ -308,11 +314,11 @@ export function createGameStateStorage(db: DB) {
       };
 
       // Apply the incoming fields on top of the cloned base
-      if (fields.date !== undefined) baseState.date = fields.date as any;
-      if (fields.time !== undefined) baseState.time = fields.time as any;
-      if (fields.location !== undefined) baseState.location = fields.location as any;
-      if (fields.weather !== undefined) baseState.weather = fields.weather as any;
-      if (fields.temperature !== undefined) baseState.temperature = fields.temperature as any;
+      if (fields.date !== undefined) baseState.date = coerceGameStateTextValue(fields.date);
+      if (fields.time !== undefined) baseState.time = coerceGameStateTextValue(fields.time);
+      if (fields.location !== undefined) baseState.location = coerceGameStateTextValue(fields.location);
+      if (fields.weather !== undefined) baseState.weather = coerceGameStateTextValue(fields.weather);
+      if (fields.temperature !== undefined) baseState.temperature = coerceGameStateTextValue(fields.temperature);
       if (fields.presentCharacters !== undefined) baseState.presentCharacters = fields.presentCharacters as any;
       if (fields.playerStats !== undefined) baseState.playerStats = fields.playerStats as any;
       if (fields.personaStats !== undefined) baseState.personaStats = fields.personaStats as any;
@@ -321,7 +327,8 @@ export function createGameStateStorage(db: DB) {
         ? MANUAL_OVERRIDE_FIELDS.reduce<Record<string, string>>(
             (acc, key) => {
               const value = fields[key];
-              if (typeof value === "string" && value !== "") acc[key] = value;
+              const text = coerceGameStateTextValue(value);
+              if (text) acc[key] = text;
               return acc;
             },
             {},
@@ -351,11 +358,11 @@ export function createGameStateStorage(db: DB) {
       manual?: boolean,
     ) {
       const updates: Record<string, unknown> = {};
-      if (fields.date !== undefined) updates.date = fields.date;
-      if (fields.time !== undefined) updates.time = fields.time;
-      if (fields.location !== undefined) updates.location = fields.location;
-      if (fields.weather !== undefined) updates.weather = fields.weather;
-      if (fields.temperature !== undefined) updates.temperature = fields.temperature;
+      if (fields.date !== undefined) updates.date = coerceGameStateTextValue(fields.date);
+      if (fields.time !== undefined) updates.time = coerceGameStateTextValue(fields.time);
+      if (fields.location !== undefined) updates.location = coerceGameStateTextValue(fields.location);
+      if (fields.weather !== undefined) updates.weather = coerceGameStateTextValue(fields.weather);
+      if (fields.temperature !== undefined) updates.temperature = coerceGameStateTextValue(fields.temperature);
       if (fields.presentCharacters !== undefined) updates.presentCharacters = JSON.stringify(fields.presentCharacters);
       if (fields.playerStats !== undefined)
         updates.playerStats = fields.playerStats ? JSON.stringify(fields.playerStats) : null;
@@ -368,11 +375,12 @@ export function createGameStateStorage(db: DB) {
         const existing: Record<string, string> = row.manualOverrides ? JSON.parse(row.manualOverrides as string) : {};
         for (const key of MANUAL_OVERRIDE_FIELDS) {
           if (fields[key] !== undefined) {
+            const text = coerceGameStateTextValue(fields[key]);
             // Setting a field to null/empty removes the override so the agent can update it again
-            if (fields[key] == null || fields[key] === "") {
+            if (!text) {
               delete existing[key];
             } else {
-              existing[key] = fields[key] as string;
+              existing[key] = text;
             }
           }
         }

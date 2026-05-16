@@ -122,6 +122,8 @@ export interface ChatMetadata {
   groupResponseOrder?: GroupResponseOrder;
   /** Characters with visible roleplay sprites enabled for this chat. */
   spriteCharacterIds?: string[];
+  /** Which sprite file families the roleplay Expression Engine may display. */
+  spriteDisplayModes?: Array<"expressions" | "full-body">;
   /** Preferred sidebar / default layout side for chat sprites. */
   spritePosition?: SpriteSide;
   /** Display scale for roleplay Expression Engine sprites. */
@@ -159,6 +161,8 @@ export interface ChatMetadata {
   showInputTranslateButton?: boolean;
   /** Allow roleplay characters to create direct-message conversation chats with hidden [dm] commands. */
   roleplayDmCommandsEnabled?: boolean;
+  /** Chat-scoped Intiface Central WebSocket URL for haptic manual and auto-connect. */
+  hapticIntifaceUrl?: string | null;
   /** Durable count of autonomous messages the user has not viewed yet. */
   autonomousUnreadCount?: number;
   /** Character IDs that contributed to the current autonomous unread state. */
@@ -175,6 +179,8 @@ export interface ChatMetadata {
   characterSchedules?: Record<string, unknown>;
   /** Week start timestamp for the current generated conversation schedules. */
   scheduleWeekStart?: string;
+  /** Chat-scoped selfie prompt-builder template. Empty/null uses the global/default prompt. */
+  selfiePrompt?: string | null;
   /** Extra positive prompt/tags appended to generated conversation selfie prompts. */
   selfiePositivePrompt?: string;
   /** Extra negative prompt/tags sent with generated conversation selfies. */
@@ -229,6 +235,8 @@ export interface ChatMetadata {
   gameLastIllustrationTag?: string;
   /** Extra user instructions for game scene illustration prompts. */
   gameImagePromptInstructions?: string | null;
+  /** Per-game asset browser folder exclusions. Omitted/null means every asset folder is available. */
+  gameAssetSelection?: { excludedFolders?: string[] } | null;
   /** When true, Game Mode uses Spotify DJ for music instead of local music assets. */
   gameUseSpotifyMusic?: boolean;
   /** Music source constraint for Spotify DJ in Game Mode. */

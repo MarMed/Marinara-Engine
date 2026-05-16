@@ -141,8 +141,20 @@ import {
   useCustomTools,
   type CustomToolRow,
 } from "../../hooks/use-custom-tools";
-import { useHapticStatus, useHapticConnect, useHapticDisconnect, useHapticStartScan } from "../../hooks/use-haptic";
+import {
+  HAPTIC_INTIFACE_URL_STORAGE_KEY,
+  useHapticStatus,
+  useHapticConnect,
+  useHapticDisconnect,
+  useHapticStartScan,
+} from "../../hooks/use-haptic";
 import { normalizeSpritePlacements } from "./sprite-placement";
+import {
+  DEFAULT_SPRITE_DISPLAY_MODES,
+  hasSpriteDisplayMode,
+  normalizeSpriteDisplayModes,
+  type SpriteDisplayMode,
+} from "./sprite-display-modes";
 
 interface ChatSettingsDrawerProps {
   chat: Chat;
@@ -199,6 +211,14 @@ type LorebookActiveReason = "Global" | "Character" | "Persona" | "Chat";
 type ActiveLorebookView = Lorebook & {
   activeReasons: LorebookActiveReason[];
   isPinned: boolean;
+};
+
+type DrawerPersona = {
+  id: string;
+  name: string;
+  comment: string;
+  avatarPath: string | null;
+  avatarCrop?: AvatarCrop | string | null;
 };
 
 type AgentAddPreview = {
@@ -311,12 +331,7 @@ export function ChatSettingsDrawer({
   const { data: customTools } = useCustomTools();
   const { data: customToolCapabilities } = useCustomToolCapabilities();
   const { data: allChats } = useChats();
-  const personas = (allPersonas ?? []) as Array<{
-    id: string;
-    name: string;
-    comment: string;
-    avatarPath: string | null;
-  }>;
+  const personas = useMemo(() => (allPersonas ?? []) as DrawerPersona[], [allPersonas]);
 
   const chatCharIds: string[] = useMemo(
     () => (typeof chat.characterIds === "string" ? JSON.parse(chat.characterIds) : (chat.characterIds ?? [])),
@@ -408,6 +423,7 @@ export function ChatSettingsDrawer({
   const gameAgentFeatureCount =
     (metadata.enableAgents ? 1 : 0) + (gameLorebookKeeperEnabled ? 1 : 0) + (gameUseSpotifyMusic ? 1 : 0);
   const spriteCharacterIds: string[] = Array.isArray(metadata.spriteCharacterIds) ? metadata.spriteCharacterIds : [];
+  const spriteDisplayModes = normalizeSpriteDisplayModes(metadata.spriteDisplayModes);
   const spritePosition: "left" | "right" = metadata.spritePosition === "right" ? "right" : "left";
   const spriteScale = normalizeSpriteDisplayValue(metadata.spriteScale, roleplaySpriteScale, 0.5, 1.75);
   const spriteOpacity = normalizeSpriteDisplayValue(metadata.spriteOpacity, 1, 0.15, 1);
@@ -561,23 +577,37 @@ export function ChatSettingsDrawer({
     [chatCharIds, characters],
   );
 
+  const activePersona = useMemo(
+    () => (chat.personaId ? (personas.find((persona) => persona.id === chat.personaId) ?? null) : null),
+    [chat.personaId, personas],
+  );
+
+  const chatSpriteSubjects = useMemo(
+    () => [
+      ...chatCharacters.map((character) => ({ kind: "character" as const, id: character.id, character })),
+      ...(activePersona ? [{ kind: "persona" as const, id: activePersona.id, persona: activePersona }] : []),
+    ],
+    [activePersona, chatCharacters],
+  );
+
   const chatSpriteQueries = useQueries({
-    queries: chatCharacters.map((character) => ({
-      queryKey: ["sprites", character.id],
-      queryFn: () => api.get<SpriteInfo[]>(`/sprites/${character.id}`),
-      enabled: !!character.id,
+    queries: chatSpriteSubjects.map((subject) => ({
+      queryKey: ["sprites", subject.id],
+      queryFn: () => api.get<SpriteInfo[]>(`/sprites/${subject.id}`),
+      enabled: !!subject.id,
       staleTime: 5 * 60_000,
     })),
   });
 
-  const chatCharactersWithSprites = chatCharacters.filter((character, index) => {
+  const chatSpriteSubjectsWithSprites = chatSpriteSubjects.filter((subject, index) => {
     const sprites = chatSpriteQueries[index]?.data;
     return Array.isArray(sprites) && sprites.length > 0;
   });
-  const chatCharactersLoading = chatCharIds.length > 0 && allCharacters == null;
+  const chatSpriteSubjectsLoading =
+    (chatCharIds.length > 0 && allCharacters == null) || (!!chat.personaId && allPersonas == null);
   const chatSpriteChoicesLoading =
-    chatCharacters.length > 0 &&
-    chatCharactersWithSprites.length === 0 &&
+    chatSpriteSubjects.length > 0 &&
+    chatSpriteSubjectsWithSprites.length === 0 &&
     chatSpriteQueries.some((query) => query.isLoading);
 
   // Memoize character name parsing — avoids repeated JSON.parse per render
@@ -739,6 +769,16 @@ export function ChatSettingsDrawer({
       current.push(charId);
     }
     updateMeta.mutate({ id: chat.id, spriteCharacterIds: current });
+  };
+
+  const toggleSpriteDisplayMode = (mode: SpriteDisplayMode) => {
+    const current = normalizeSpriteDisplayModes(metadata.spriteDisplayModes);
+    const active = current.includes(mode);
+    const next = active ? current.filter((value) => value !== mode) : [...current, mode];
+    updateMeta.mutate({
+      id: chat.id,
+      spriteDisplayModes: next.length > 0 ? next : [...DEFAULT_SPRITE_DISPLAY_MODES],
+    });
   };
 
   const setSpriteSide = useCallback(
@@ -2521,6 +2561,10 @@ export function ChatSettingsDrawer({
           )}
 
           {isConversation && (
+            <ConversationPromptSection chat={chat} metadata={metadata} updateMeta={updateMeta} />
+          )}
+
+          {isConversation && (
             <Section
               label="Manual Replies"
               icon={<MessageCircle size="0.875rem" />}
@@ -3013,9 +3057,11 @@ export function ChatSettingsDrawer({
                   {/* Selfie prompt controls */}
                   {(metadata.imageGenConnectionId as string) && (
                     <SelfiePromptControls
+                      promptTemplate={metadata.selfiePrompt as string | null | undefined}
                       positivePrompt={metadata.selfiePositivePrompt as string | undefined}
                       legacyTags={(metadata.selfieTags as string[]) ?? []}
                       negativePrompt={(metadata.selfieNegativePrompt as string) ?? ""}
+                      onCommitPromptTemplate={(selfiePrompt) => updateMeta.mutate({ id: chat.id, selfiePrompt })}
                       onCommitPositivePrompt={(selfiePositivePrompt) =>
                         updateMeta.mutate({ id: chat.id, selfiePositivePrompt })
                       }
@@ -3846,46 +3892,55 @@ export function ChatSettingsDrawer({
                           )}
                         </div>
                         <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
-                          Choose which added characters can appear as VN sprites and control the sprite layout for this
-                          chat.
+                          Choose which added characters or the active persona can appear as VN sprites and control the
+                          sprite layout for this chat.
                         </p>
                       </div>
                     </div>
 
-                    {chatCharIds.length === 0 ? (
+                    <SpriteDisplayModeToggle modes={spriteDisplayModes} onToggle={toggleSpriteDisplayMode} />
+
+                    {chatSpriteSubjects.length === 0 ? (
                       <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                        Add characters to this chat first to enable sprite selection.
+                        Add characters to this chat or choose a persona first to enable sprite selection.
                       </p>
-                    ) : chatCharactersLoading ? (
-                      <p className="text-[0.625rem] text-[var(--muted-foreground)]">Loading added characters...</p>
-                    ) : chatCharactersWithSprites.length > 0 ? (
+                    ) : chatSpriteSubjectsLoading ? (
+                      <p className="text-[0.625rem] text-[var(--muted-foreground)]">Loading sprite owners...</p>
+                    ) : chatSpriteSubjectsWithSprites.length > 0 ? (
                       <div className="space-y-1.5">
-                        {chatCharactersWithSprites.map((character) => {
-                          const name = charName(character);
-                          const title = charTitle(character);
-                          const spriteActive = spriteCharacterIds.includes(character.id);
+                        {chatSpriteSubjectsWithSprites.map((subject) => {
+                          const isPersona = subject.kind === "persona";
+                          const name = isPersona ? subject.persona.name : charName(subject.character);
+                          const title = isPersona ? subject.persona.comment || "Persona" : charTitle(subject.character);
+                          const avatarPath = isPersona ? subject.persona.avatarPath : subject.character.avatarPath;
+                          const avatarCrop = isPersona ? null : charAvatarCrop(subject.character);
+                          const spriteActive = spriteCharacterIds.includes(subject.id);
 
                           return (
                             <div
-                              key={character.id}
+                              key={`${subject.kind}:${subject.id}`}
                               className="flex items-center gap-2.5 rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]"
                             >
                               <button
                                 onClick={() => {
                                   onClose();
-                                  useUIStore.getState().openCharacterDetail(character.id);
+                                  if (isPersona) {
+                                    useUIStore.getState().openPersonaDetail(subject.id);
+                                  } else {
+                                    useUIStore.getState().openCharacterDetail(subject.id);
+                                  }
                                 }}
                                 className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:opacity-80"
-                                title="Open character card"
+                                title={isPersona ? "Open persona" : "Open character card"}
                               >
-                                {character.avatarPath ? (
+                                {avatarPath ? (
                                   <span className="relative block h-8 w-8 shrink-0 overflow-hidden rounded-full">
                                     <img
-                                      src={character.avatarPath}
+                                      src={avatarPath}
                                       alt={name}
                                       loading="lazy"
                                       className="h-full w-full object-cover"
-                                      style={getAvatarCropStyle(charAvatarCrop(character))}
+                                      style={getAvatarCropStyle(avatarCrop)}
                                     />
                                   </span>
                                 ) : (
@@ -3901,7 +3956,7 @@ export function ChatSettingsDrawer({
                                     </span>
                                   )}
                                   <span className="block text-[0.625rem] text-[var(--muted-foreground)]">
-                                    Uploaded sprites available
+                                    {isPersona ? "Persona sprites available" : "Uploaded sprites available"}
                                   </span>
                                 </div>
                               </button>
@@ -3909,7 +3964,7 @@ export function ChatSettingsDrawer({
                               <SpriteToggleButton
                                 active={spriteActive}
                                 disabled={!spriteActive && spriteCharacterIds.length >= 3}
-                                onToggle={() => toggleSprite(character.id)}
+                                onToggle={() => toggleSprite(subject.id)}
                               />
                             </div>
                           );
@@ -3927,7 +3982,7 @@ export function ChatSettingsDrawer({
 
                     <p className="text-[0.625rem] text-[var(--muted-foreground)]">
                       {expressionActive
-                        ? "Only added characters with uploaded sprites appear here. You can enable up to 3 at a time."
+                        ? "Only added characters and the active persona with uploaded sprites appear here. You can enable up to 3 at a time."
                         : activeAgentIds.length === 0
                           ? "Expression Engine is not currently enabled in this chat. These sprite choices will apply once it is enabled."
                           : "Expression Engine is not in this chat's active agent list. Add it below to show sprites during roleplay."}
@@ -4094,7 +4149,16 @@ export function ChatSettingsDrawer({
                         />
                       </div>
                     </button>
-                    {metadata.enableHapticFeedback && <HapticConnectionPanel />}
+                    {metadata.enableHapticFeedback && (
+                      <HapticConnectionPanel
+                        intifaceUrl={
+                          typeof metadata.hapticIntifaceUrl === "string" ? metadata.hapticIntifaceUrl : undefined
+                        }
+                        onIntifaceUrlChange={(hapticIntifaceUrl) =>
+                          updateMeta.mutate({ id: chat.id, hapticIntifaceUrl })
+                        }
+                      />
+                    )}
                   </div>
                 )}
 
@@ -5675,24 +5739,8 @@ function AdvancedParametersSection({
   const defaults = getEditableGenerationParameters(modeDefaults, conn?.defaultParameters);
   const saveDefaults = useSaveConnectionDefaults();
   const [expanded, setExpanded] = useState(false);
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [promptDraft, setPromptDraft] = useState("");
   const params = (metadata.chatParameters as Record<string, unknown>) ?? {};
-  const customPrompt = (metadata.customSystemPrompt as string) ?? "";
   const effectiveParams = getEditableGenerationParameters(defaults, params);
-
-  const openPromptEditor = () => {
-    setPromptDraft(customPrompt || DEFAULT_CONVERSATION_PROMPT);
-    setPromptOpen(true);
-  };
-  const closePromptEditor = () => {
-    // Save on close — only persist if the user actually changed something
-    const isDefault = promptDraft === DEFAULT_CONVERSATION_PROMPT;
-    updateMeta.mutate({ id: chat.id, customSystemPrompt: isDefault ? null : promptDraft });
-    // Also save as the new default for all future conversations
-    useUIStore.getState().setCustomConversationPrompt(isDefault ? null : promptDraft);
-    setPromptOpen(false);
-  };
 
   const setParameters = (next: EditableGenerationParameters) => {
     updateMeta.mutate({ id: chat.id, chatParameters: { ...params, ...next } });
@@ -5722,36 +5770,6 @@ function AdvancedParametersSection({
       {expanded && (
         <div className="px-4 pb-3 space-y-3">
           <GenerationParametersFields value={effectiveParams} onChange={setParameters} />
-          {/* System Prompt — conversation mode only */}
-          {isConversation && (
-            <div>
-              <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">System Prompt</span>
-              <p className="text-[0.5625rem] text-[var(--muted-foreground)]/70 mt-0.5">
-                {customPrompt ? "Using custom prompt" : "Using default prompt"}
-              </p>
-              <div className="mt-1 flex gap-1.5">
-                <button
-                  onClick={openPromptEditor}
-                  className="flex-1 rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-[0.625rem] font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]"
-                >
-                  <Pencil size="0.625rem" className="inline mr-1 -mt-px" />
-                  Edit Prompt
-                </button>
-                {customPrompt && (
-                  <button
-                    onClick={() => {
-                      updateMeta.mutate({ id: chat.id, customSystemPrompt: null });
-                      useUIStore.getState().setCustomConversationPrompt(null);
-                    }}
-                    className="rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-[0.625rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]"
-                    title="Reset to default prompt"
-                  >
-                    <Trash2 size="0.625rem" />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
           {/* Save as Default for Connection */}
           {connectionId && connectionId !== "random" && (
             <button
@@ -5770,8 +5788,7 @@ function AdvancedParametersSection({
           {/* Reset */}
           <button
             onClick={() => {
-              updateMeta.mutate({ id: chat.id, chatParameters: defaults, customSystemPrompt: null });
-              useUIStore.getState().setCustomConversationPrompt(null);
+              updateMeta.mutate({ id: chat.id, chatParameters: defaults });
             }}
             className="w-full rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-[0.625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
           >
@@ -5779,6 +5796,79 @@ function AdvancedParametersSection({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ConversationPromptSection({
+  chat,
+  metadata,
+  updateMeta,
+}: {
+  chat: Chat;
+  metadata: Record<string, unknown>;
+  updateMeta: ReturnType<typeof useUpdateChatMetadata>;
+}) {
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
+  const customPrompt = (metadata.customSystemPrompt as string) ?? "";
+
+  const openPromptEditor = () => {
+    setPromptDraft(customPrompt || DEFAULT_CONVERSATION_PROMPT);
+    setPromptOpen(true);
+  };
+
+  const closePromptEditor = () => {
+    const isDefault = promptDraft === DEFAULT_CONVERSATION_PROMPT;
+    updateMeta.mutate({ id: chat.id, customSystemPrompt: isDefault ? null : promptDraft });
+    useUIStore.getState().setCustomConversationPrompt(isDefault ? null : promptDraft);
+    setPromptOpen(false);
+  };
+
+  const resetPrompt = () => {
+    updateMeta.mutate({ id: chat.id, customSystemPrompt: null });
+    useUIStore.getState().setCustomConversationPrompt(null);
+  };
+
+  return (
+    <>
+      <Section
+        label="Prompt"
+        icon={<Feather size="0.875rem" />}
+        help="Conversation-only system prompt that shapes how characters text in this chat."
+      >
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 ring-1 ring-[var(--border)]">
+            <div className="min-w-0">
+              <span className="block text-[0.6875rem] font-medium text-[var(--foreground)]">System Prompt</span>
+              <span className="block text-[0.625rem] text-[var(--muted-foreground)]">
+                {customPrompt ? "Using custom conversation prompt" : "Using default conversation prompt"}
+              </span>
+            </div>
+            <span className="shrink-0 rounded-full bg-[var(--background)] px-2 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+              {customPrompt ? "Custom" : "Default"}
+            </span>
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              onClick={openPromptEditor}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-[0.625rem] font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]"
+            >
+              <Pencil size="0.625rem" />
+              Edit Prompt
+            </button>
+            {customPrompt && (
+              <button
+                onClick={resetPrompt}
+                className="flex items-center justify-center rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-[0.625rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                title="Reset to default prompt"
+              >
+                <Trash2 size="0.625rem" />
+              </button>
+            )}
+          </div>
+        </div>
+      </Section>
       <ExpandedTextarea
         open={promptOpen}
         onClose={closePromptEditor}
@@ -5787,7 +5877,7 @@ function AdvancedParametersSection({
         onChange={setPromptDraft}
         placeholder="Enter your custom system prompt..."
       />
-    </div>
+    </>
   );
 }
 
@@ -6134,6 +6224,53 @@ function SpriteRangeSlider({
   );
 }
 
+function SpriteDisplayModeToggle({
+  modes,
+  onToggle,
+}: {
+  modes: readonly SpriteDisplayMode[];
+  onToggle: (mode: SpriteDisplayMode) => void;
+}) {
+  const options: Array<{ id: SpriteDisplayMode; label: string }> = [
+    { id: "expressions", label: "Expressions" },
+    { id: "full-body", label: "Full-body" },
+  ];
+
+  return (
+    <div className="space-y-1.5 rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[0.6875rem] font-medium text-[var(--foreground)]">Sprite Source</span>
+        <span className="text-[0.5625rem] text-[var(--muted-foreground)]">choose one or both</span>
+      </div>
+      <div className="grid grid-cols-2 overflow-hidden rounded-md ring-1 ring-[var(--border)]">
+        {options.map((option, index) => {
+          const active = hasSpriteDisplayMode(modes, option.id);
+          const isLastActive = active && modes.length === 1;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onToggle(option.id)}
+              disabled={isLastActive}
+              className={cn(
+                "min-w-0 px-2.5 py-1.5 text-[0.625rem] font-medium transition-colors",
+                index > 0 && "border-l border-[var(--border)]",
+                active
+                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                  : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                isLastActive && "cursor-not-allowed",
+              )}
+              title={isLastActive ? "At least one sprite source must stay enabled" : `${option.label} sprites`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Sprite toggle button (per character) ──
 function SpriteToggleButton({
   active,
@@ -6181,22 +6318,32 @@ interface ScheduleBlock {
 }
 
 function SelfiePromptControls({
+  promptTemplate,
   positivePrompt,
   legacyTags,
   negativePrompt,
+  onCommitPromptTemplate,
   onCommitPositivePrompt,
   onCommitNegativePrompt,
 }: {
+  promptTemplate: string | null | undefined;
   positivePrompt: string | undefined;
   legacyTags: string[];
   negativePrompt: string;
+  onCommitPromptTemplate: (value: string | null) => void;
   onCommitPositivePrompt: (value: string) => void;
   onCommitNegativePrompt: (value: string) => void;
 }) {
   const legacyTagText = legacyTags.join(", ");
   const displayPositivePrompt = positivePrompt ?? legacyTagText;
+  const displayPromptTemplate = promptTemplate ?? "";
+  const [promptDraft, setPromptDraft] = useState(displayPromptTemplate);
   const [positiveDraft, setPositiveDraft] = useState(displayPositivePrompt);
   const [negativeDraft, setNegativeDraft] = useState(negativePrompt);
+
+  useEffect(() => {
+    setPromptDraft(displayPromptTemplate);
+  }, [displayPromptTemplate]);
 
   useEffect(() => {
     setPositiveDraft(displayPositivePrompt);
@@ -6205,6 +6352,11 @@ function SelfiePromptControls({
   useEffect(() => {
     setNegativeDraft(negativePrompt);
   }, [negativePrompt]);
+
+  const commitPromptTemplate = useCallback(() => {
+    const nextValue = promptDraft.trim().length > 0 ? promptDraft : null;
+    if ((nextValue ?? "") !== displayPromptTemplate) onCommitPromptTemplate(nextValue);
+  }, [displayPromptTemplate, onCommitPromptTemplate, promptDraft]);
 
   const commitPositivePrompt = useCallback(() => {
     if (positiveDraft !== displayPositivePrompt) onCommitPositivePrompt(positiveDraft);
@@ -6217,7 +6369,17 @@ function SelfiePromptControls({
   return (
     <div className="mt-2 space-y-2">
       <label className="flex flex-col gap-1">
-        <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Positive prompt / tags</span>
+        <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Selfie prompt</span>
+        <textarea
+          value={promptDraft}
+          onChange={(e) => setPromptDraft(e.target.value)}
+          onBlur={commitPromptTemplate}
+          placeholder={`You are an image prompt generator. Create a concise selfie prompt for ${"${charName}"} using this appearance: ${"${appearance}"}.\nOutput ONLY the prompt text, nothing else.`}
+          className="min-h-[7rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Positive tags</span>
         <textarea
           value={positiveDraft}
           onChange={(e) => setPositiveDraft(e.target.value)}
@@ -6237,8 +6399,9 @@ function SelfiePromptControls({
         />
       </label>
       <p className="text-[0.55rem] text-[var(--muted-foreground)]">
-        Saved for this chat. Positive tags are appended to the generated selfie prompt; negative tags are sent directly
-        to the image generator. NovelAI tag syntax is supported.
+        Saved for this chat. Leave the selfie prompt blank to use the default prompt. The template can use{" "}
+        {"${charName}"} and {"${appearance}"}. Positive tags are appended to the generated selfie prompt; negative tags
+        are sent directly to the image generator.
       </p>
     </div>
   );
@@ -6590,19 +6753,46 @@ function ScheduleEditor({
 }
 
 // ── Haptic Connection Panel ──
-function HapticConnectionPanel() {
+function HapticConnectionPanel({
+  intifaceUrl: savedIntifaceUrl,
+  onIntifaceUrlChange,
+}: {
+  intifaceUrl?: string;
+  onIntifaceUrlChange: (value: string | null) => void;
+}) {
   const { data: status, isLoading } = useHapticStatus();
   const connect = useHapticConnect();
   const disconnect = useHapticDisconnect();
   const startScan = useHapticStartScan();
+  const [intifaceUrl, setIntifaceUrl] = useState(
+    () => savedIntifaceUrl ?? localStorage.getItem(HAPTIC_INTIFACE_URL_STORAGE_KEY) ?? "",
+  );
+  const [autoConnectAttempted, setAutoConnectAttempted] = useState(false);
+
+  useEffect(() => {
+    setIntifaceUrl(savedIntifaceUrl ?? localStorage.getItem(HAPTIC_INTIFACE_URL_STORAGE_KEY) ?? "");
+  }, [savedIntifaceUrl]);
+
+  const saveIntifaceUrl = useCallback(() => {
+    const trimmed = intifaceUrl.trim();
+    if (trimmed) {
+      localStorage.setItem(HAPTIC_INTIFACE_URL_STORAGE_KEY, trimmed);
+    } else {
+      localStorage.removeItem(HAPTIC_INTIFACE_URL_STORAGE_KEY);
+    }
+    if ((savedIntifaceUrl ?? "") !== trimmed) {
+      onIntifaceUrlChange(trimmed || null);
+    }
+    return trimmed;
+  }, [intifaceUrl, onIntifaceUrlChange, savedIntifaceUrl]);
 
   // Auto-connect on mount if not connected
   useEffect(() => {
-    if (!isLoading && status && !status.connected && !connect.isPending) {
-      connect.mutate(undefined);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
+    if (autoConnectAttempted || isLoading || !status || status.connected || connect.isPending) return;
+    setAutoConnectAttempted(true);
+    const trimmed = saveIntifaceUrl();
+    connect.mutate(trimmed || undefined);
+  }, [autoConnectAttempted, connect, isLoading, saveIntifaceUrl, status]);
 
   if (isLoading) {
     return (
@@ -6615,15 +6805,35 @@ function HapticConnectionPanel() {
   const connected = status?.connected ?? false;
   const devices = status?.devices ?? [];
   const scanning = status?.scanning ?? false;
+  const defaultServerUrl = status?.defaultServerUrl ?? "ws://127.0.0.1:12345";
+  const activeServerUrl = status?.serverUrl ?? defaultServerUrl;
 
   return (
     <div className="space-y-1.5 px-1">
+      <label className="flex flex-col gap-1 rounded-lg bg-[var(--secondary)] px-3 py-2">
+        <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">Intiface URL</span>
+        <input
+          value={intifaceUrl}
+          onChange={(event) => setIntifaceUrl(event.target.value)}
+          onBlur={saveIntifaceUrl}
+          placeholder={defaultServerUrl}
+          className="rounded-md bg-[var(--background)] px-2.5 py-1.5 text-[0.6875rem] text-[var(--foreground)] outline-none ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)]/55 focus:ring-[var(--primary)]/60"
+        />
+        <span className="text-[0.5625rem] leading-relaxed text-[var(--muted-foreground)]">
+          Blank uses the server default. Docker or remote browser setups usually need ws://CLIENT_IP:12345.
+        </span>
+      </label>
+
       {/* Connection status */}
       <div className="flex items-center justify-between rounded-lg bg-[var(--secondary)] px-3 py-2">
-        <div className="flex items-center gap-1.5">
+        <div className="min-w-0 flex items-center gap-1.5">
           <div className={cn("h-1.5 w-1.5 rounded-full", connected ? "bg-green-400" : "bg-red-400")} />
-          <span className="text-[0.625rem] text-[var(--muted-foreground)]">
-            {connect.isPending ? "Connecting..." : connected ? "Connected to Intiface Central" : "Not connected"}
+          <span className="min-w-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">
+            {connect.isPending
+              ? `Connecting to ${intifaceUrl.trim() || defaultServerUrl}...`
+              : connected
+                ? `Connected: ${activeServerUrl}`
+                : "Not connected"}
           </span>
         </div>
         <button
@@ -6631,7 +6841,7 @@ function HapticConnectionPanel() {
             if (connected) {
               disconnect.mutate();
             } else {
-              connect.mutate(undefined);
+              connect.mutate(saveIntifaceUrl() || undefined);
             }
           }}
           disabled={connect.isPending || disconnect.isPending}

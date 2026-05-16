@@ -5,7 +5,7 @@ type GenerationReplay = NonNullable<MessageExtra["generationReplay"]>;
 type GuideSource = NonNullable<GenerationReplay["generationGuideSource"]>;
 
 const GUIDE_SOURCE_LABELS: Record<GuideSource, string> = {
-  narrator: "/narrator",
+  narrator: "/guided",
   guide: "Guided regenerate",
   game_start: "Game start",
 };
@@ -67,9 +67,10 @@ export function GenerationReplayDetailsModal({
 }) {
   const generationGuide = visibleGenerationGuide(replay);
   const impersonateDirection = storedText(replay?.userMessage);
-  const impersonateGuidance = hasGenerationReplayDetails(replay) && replay?.impersonate === true
-    ? (generationGuide ?? impersonateDirection)
-    : null;
+  const impersonateGuidance =
+    hasGenerationReplayDetails(replay) && replay?.impersonate === true
+      ? (generationGuide ?? impersonateDirection)
+      : null;
   const impersonatePromptTemplate = storedText(replay?.impersonatePromptTemplate);
   const hasImpersonate = replay?.impersonate === true;
   const hasMetadata =

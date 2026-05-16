@@ -64,6 +64,7 @@ import {
 import { generateWeather, inferBiome, shouldWeatherChange } from "../services/game/weather.service.js";
 import { rollEncounter, rollEnemyCount } from "../services/game/encounter.service.js";
 import { processReputationActions } from "../services/game/reputation.service.js";
+import { sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
 import { createCheckpointService, type CheckpointTrigger } from "../services/game/checkpoint.service.js";
 import {
   resolveSkillCheck,
@@ -144,7 +145,21 @@ import {
 // Helpers
 // ──────────────────────────────────────────────
 
-const AVATAR_NAME_TITLE_WORDS = new Set(["a", "an", "the", "il", "lo", "la", "le", "l", "el", "sir", "lady", "lord"]);
+const AVATAR_NAME_TITLE_WORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "il",
+  "lo",
+  "la",
+  "le",
+  "l",
+  "el",
+  "sir",
+  "lady",
+  "lord",
+  "professor",
+]);
 
 function normalizeAvatarLookupName(value: string): string {
   return value
@@ -172,7 +187,7 @@ function avatarLookupAliases(value: string): string[] {
   ).filter(Boolean);
 }
 
-function addNameLookupEntry(map: Map<string, string>, name: unknown, value: unknown): void {
+export function addNameLookupEntry(map: Map<string, string>, name: unknown, value: unknown): void {
   if (typeof name !== "string" || typeof value !== "string") return;
   const trimmedValue = value.trim();
   if (!trimmedValue) return;
@@ -207,7 +222,7 @@ const generatedOptionalStringSchema = z.preprocess((value) => generatedStringVal
  * Title aliases make "Il Dottore" resolve to a saved "Dottore" card and
  * "Il Capitano" resolve to "Capitano" before any image generation is attempted.
  */
-function findCharAvatarFuzzy(npcName: string, charAvatarByName: Map<string, string>): string | undefined {
+export function findCharAvatarFuzzy(npcName: string, charAvatarByName: Map<string, string>): string | undefined {
   const npcAliases = avatarLookupAliases(npcName);
 
   // 1. Exact
@@ -2395,8 +2410,9 @@ function buildSceneAssetNpcCandidates(
 function upsertGameNpcAvatarEntries(currentNpcs: GameNpc[], avatarEntries: SceneAssetNpcAvatarEntry[]): GameNpc[] {
   if (avatarEntries.length === 0) return currentNpcs;
 
-  const nextNpcs = [...currentNpcs];
-  let changed = false;
+  const sanitizedCurrentNpcs = sanitizeGameNpcAvatarUrls(currentNpcs);
+  const nextNpcs = [...sanitizedCurrentNpcs];
+  let changed = sanitizedCurrentNpcs !== currentNpcs;
 
   for (const entry of avatarEntries) {
     const normalizedName = normalizeJournalMatch(entry.name);
@@ -2650,6 +2666,11 @@ export async function gameRoutes(app: FastifyInstance) {
     const latestState = await gameStateStore.getLatest(chatId);
 
     let hydratedMeta = baseMeta;
+    const gameNpcs = Array.isArray(hydratedMeta.gameNpcs) ? (hydratedMeta.gameNpcs as GameNpc[]) : null;
+    if (gameNpcs) {
+      const sanitizedNpcs = sanitizeGameNpcAvatarUrls(gameNpcs);
+      if (sanitizedNpcs !== gameNpcs) hydratedMeta = { ...hydratedMeta, gameNpcs: sanitizedNpcs };
+    }
     const presentCharacterNames = extractPresentCharacterNames(latestState?.presentCharacters);
     if (presentCharacterNames.length > 0) {
       hydratedMeta = markNpcsMetByNames(hydratedMeta, presentCharacterNames);

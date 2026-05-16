@@ -300,12 +300,12 @@ const COMMANDS: SlashCommand[] = [
     },
   },
   {
-    name: "narrator",
-    aliases: ["narrate", "nar"],
+    name: "guided",
+    aliases: ["narrator", "narrate", "nar"],
     description: "Steer the narrative — the AI will narrate events in the direction you describe",
-    usage: "/narrator <direction>",
+    usage: "/guided <direction>",
     async execute(args, ctx) {
-      if (!args.trim()) return { handled: true, feedback: "Usage: /narrator <direction to steer the narrative>" };
+      if (!args.trim()) return { handled: true, feedback: "Usage: /guided <direction to steer the narrative>" };
       await ctx.generate({
         chatId: ctx.chatId,
         connectionId: null,

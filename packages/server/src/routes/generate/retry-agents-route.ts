@@ -10,7 +10,7 @@ import {
   type GameMap,
 } from "@marinara-engine/shared";
 import { eq } from "drizzle-orm";
-import { buildSpriteExpressionChoices, listCharacterSprites } from "../../services/game/sprite.service.js";
+import { listCharacterSprites } from "../../services/game/sprite.service.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { normalizeAgentMaxParallelJobs, type ResolvedAgent } from "../../services/agents/agent-pipeline.js";
 import { executeAgent, executeAgentBatch, normalizeAgentContextSize } from "../../services/agents/agent-executor.js";
@@ -55,7 +55,11 @@ import {
   resolveAgentConnectionId,
   type AgentConnectionWarning,
 } from "./agent-connection-guards.js";
-import { validateSpriteExpressionEntries } from "./expression-agent-utils.js";
+import {
+  buildAvailableSpriteCharacter,
+  normalizeSpriteDisplayModes,
+  validateSpriteExpressionEntries,
+} from "./expression-agent-utils.js";
 import {
   normalizeContextInjections,
   normalizeSecretPlotSceneDirections,
@@ -329,21 +333,36 @@ async function buildRetryAgentContext(args: {
   // If the expression agent is being retried, load available sprite expressions per character
   if (resolvedAgentTypes.has("expression")) {
     try {
+      const spriteDisplayModes = normalizeSpriteDisplayModes(chatMeta.spriteDisplayModes);
+      const selectedSpriteIds = new Set(
+        Array.isArray(chatMeta.spriteCharacterIds)
+          ? chatMeta.spriteCharacterIds.filter((id): id is string => typeof id === "string")
+          : [],
+      );
+      const restrictToSelectedSprites = selectedSpriteIds.size > 0;
       const perChar: Array<{
         characterId: string;
         characterName: string;
         expressions: string[];
-        expressionChoices: string[];
+        expressionChoices?: string[];
       }> = [];
       for (const char of agentContext.characters) {
+        if (restrictToSelectedSprites && !selectedSpriteIds.has(char.id)) continue;
         const sprites = listCharacterSprites(char.id);
-        if (sprites && sprites.expressions.length > 0) {
-          perChar.push({
-            characterId: char.id,
-            characterName: char.name,
-            expressions: sprites.expressions,
-            expressionChoices: buildSpriteExpressionChoices(sprites.expressions),
-          });
+        if (!sprites) continue;
+        const spriteCharacter = buildAvailableSpriteCharacter(char.id, char.name, sprites, spriteDisplayModes);
+        if (spriteCharacter) perChar.push(spriteCharacter);
+      }
+      if (personaContext.personaId && (!restrictToSelectedSprites || selectedSpriteIds.has(personaContext.personaId))) {
+        const sprites = listCharacterSprites(personaContext.personaId);
+        if (sprites) {
+          const spritePersona = buildAvailableSpriteCharacter(
+            personaContext.personaId,
+            personaContext.personaName,
+            sprites,
+            spriteDisplayModes,
+          );
+          if (spritePersona) perChar.push(spritePersona);
         }
       }
       if (perChar.length > 0) {

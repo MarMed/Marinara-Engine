@@ -12,8 +12,9 @@ import {
   nameToXmlTag,
   resolveMacros,
   summariesPatchSchema,
+  coerceGameStateTextValue,
 } from "@marinara-engine/shared";
-import type { CharacterData, ChatMemoryChunk, LorebookEntryTimingState } from "@marinara-engine/shared";
+import type { CharacterData, ChatMemoryChunk, GameNpc, LorebookEntryTimingState } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -47,9 +48,26 @@ import {
   resolveMemoryRecallEmbeddingSource,
 } from "../services/memory-recall-embedding.js";
 import { applyRegexScriptsToPromptMessages } from "../services/regex/regex-application.js";
+import { sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
 
 type TrackerWrapFormat = "xml" | "markdown" | "none";
 type EntryStateOverrides = Record<string, { ephemeral?: number | null; enabled?: boolean }>;
+
+function sanitizeChatGameNpcAvatars<T extends { metadata?: unknown }>(chat: T): T {
+  const metadata = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+  if (!metadata || typeof metadata !== "object") return chat;
+  const gameNpcs = Array.isArray((metadata as Record<string, unknown>).gameNpcs)
+    ? ((metadata as Record<string, unknown>).gameNpcs as GameNpc[])
+    : null;
+  if (!gameNpcs) return chat;
+  const sanitizedNpcs = sanitizeGameNpcAvatarUrls(gameNpcs);
+  if (sanitizedNpcs === gameNpcs) return chat;
+  const sanitizedMetadata = { ...(metadata as Record<string, unknown>), gameNpcs: sanitizedNpcs };
+  return {
+    ...chat,
+    metadata: typeof chat.metadata === "string" ? JSON.stringify(sanitizedMetadata) : sanitizedMetadata,
+  };
+}
 
 async function loadLatestChatGameSnapshot(
   app: FastifyInstance,
@@ -266,19 +284,21 @@ export async function chatsRoutes(app: FastifyInstance) {
 
   // List all chats
   app.get("/", async () => {
-    return storage.list();
+    const chats = await storage.list();
+    return chats.map(sanitizeChatGameNpcAvatars);
   });
 
   // List chats by group
   app.get<{ Params: { groupId: string } }>("/group/:groupId", async (req) => {
-    return storage.listByGroup(req.params.groupId);
+    const chats = await storage.listByGroup(req.params.groupId);
+    return chats.map(sanitizeChatGameNpcAvatars);
   });
 
   // Get single chat
   app.get<{ Params: { id: string } }>("/:id", async (req, reply) => {
     const chat = await storage.getById(req.params.id);
     if (!chat) return reply.status(404).send({ error: "Chat not found" });
-    return chat;
+    return sanitizeChatGameNpcAvatars(chat);
   });
 
   // Create chat
@@ -882,20 +902,20 @@ export async function chatsRoutes(app: FastifyInstance) {
         : null;
     const hasExplicitTarget = targetMessageId !== null && targetSwipeIndex !== null;
     const fields: Partial<{
-      date: string;
-      time: string;
-      location: string;
-      weather: string;
-      temperature: string;
+      date: string | null;
+      time: string | null;
+      location: string | null;
+      weather: string | null;
+      temperature: string | null;
       presentCharacters: any[];
       playerStats: any;
       personaStats: any[];
     }> = {};
-    if (body.date !== undefined) fields.date = body.date as string;
-    if (body.time !== undefined) fields.time = body.time as string;
-    if (body.location !== undefined) fields.location = body.location as string;
-    if (body.weather !== undefined) fields.weather = body.weather as string;
-    if (body.temperature !== undefined) fields.temperature = body.temperature as string;
+    if (body.date !== undefined) fields.date = coerceGameStateTextValue(body.date);
+    if (body.time !== undefined) fields.time = coerceGameStateTextValue(body.time);
+    if (body.location !== undefined) fields.location = coerceGameStateTextValue(body.location);
+    if (body.weather !== undefined) fields.weather = coerceGameStateTextValue(body.weather);
+    if (body.temperature !== undefined) fields.temperature = coerceGameStateTextValue(body.temperature);
     if (body.presentCharacters !== undefined) fields.presentCharacters = body.presentCharacters as any[];
     if (body.playerStats !== undefined) fields.playerStats = body.playerStats;
     if (body.personaStats !== undefined) fields.personaStats = body.personaStats as any[];
@@ -943,7 +963,8 @@ export async function chatsRoutes(app: FastifyInstance) {
       const manualOverrides: Record<string, string> = {};
       const TRACKABLE = ["date", "time", "location", "weather", "temperature"] as const;
       for (const key of TRACKABLE) {
-        if (fields[key] !== undefined) manualOverrides[key] = fields[key] as string;
+        const text = coerceGameStateTextValue(fields[key]);
+        if (text) manualOverrides[key] = text;
       }
       await gameStateStore.create(
         {

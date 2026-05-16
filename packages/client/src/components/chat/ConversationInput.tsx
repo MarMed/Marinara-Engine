@@ -431,58 +431,61 @@ export function ConversationInput({
     return () => window.removeEventListener("pagehide", flushDraft);
   }, []);
 
-  const handleFileUpload = useCallback(async (files: FileList | File[] | null) => {
-    if (!files) return;
-    const originChatId = useChatStore.getState().activeChatId;
-    if (!originChatId) return;
+  const handleFileUpload = useCallback(
+    async (files: FileList | File[] | null) => {
+      if (!files) return;
+      const originChatId = useChatStore.getState().activeChatId;
+      if (!originChatId) return;
 
-    const MAX_SIZE = 20 * 1024 * 1024;
-    const acceptedFiles = Array.from(files).filter((file) => {
-      if (file.size > MAX_SIZE) {
-        toast.error(`${file.name} exceeds 20 MB limit`);
-        return false;
-      }
-      if (!isSupportedChatAttachment(file)) {
-        toast.error(
-          `${file.name || "That file"} is not supported in chat. Attach images or text files like JSON, TXT, Markdown, or CSV.`,
-        );
-        return false;
-      }
-      return true;
-    });
+      const MAX_SIZE = 20 * 1024 * 1024;
+      const acceptedFiles = Array.from(files).filter((file) => {
+        if (file.size > MAX_SIZE) {
+          toast.error(`${file.name} exceeds 20 MB limit`);
+          return false;
+        }
+        if (!isSupportedChatAttachment(file)) {
+          toast.error(
+            `${file.name || "That file"} is not supported in chat. Attach images or text files like JSON, TXT, Markdown, or CSV.`,
+          );
+          return false;
+        }
+        return true;
+      });
 
-    if (acceptedFiles.length === 0) return;
-    adjustPendingAttachmentReads(originChatId, acceptedFiles.length);
+      if (acceptedFiles.length === 0) return;
+      adjustPendingAttachmentReads(originChatId, acceptedFiles.length);
 
-    for (const file of acceptedFiles) {
-      const displayName = file.name || "pasted-file";
-      // Convert GIFs to PNG (Gemini and some providers don't support image/gif)
-      if (file.type === "image/gif") {
+      for (const file of acceptedFiles) {
+        const displayName = file.name || "pasted-file";
+        // Convert GIFs to PNG (Gemini and some providers don't support image/gif)
+        if (file.type === "image/gif") {
+          try {
+            const { dataUrl } = await convertToPng(file);
+            appendAttachmentForChat(originChatId, {
+              type: "image/png",
+              data: dataUrl,
+              name: displayName.replace(/\.gif$/i, ".png"),
+            });
+          } catch {
+            toast.error(`Failed to convert ${displayName}`);
+          } finally {
+            adjustPendingAttachmentReads(originChatId, -1);
+          }
+          continue;
+        }
+
         try {
-          const { dataUrl } = await convertToPng(file);
-          appendAttachmentForChat(originChatId, {
-            type: "image/png",
-            data: dataUrl,
-            name: displayName.replace(/\.gif$/i, ".png"),
-          });
+          const data = await readFileAsDataUrl(file);
+          appendAttachmentForChat(originChatId, { type: inferAttachmentType(file), data, name: displayName });
         } catch {
-          toast.error(`Failed to convert ${displayName}`);
+          toast.error(`Failed to read ${displayName}`);
         } finally {
           adjustPendingAttachmentReads(originChatId, -1);
         }
-        continue;
       }
-
-      try {
-        const data = await readFileAsDataUrl(file);
-        appendAttachmentForChat(originChatId, { type: inferAttachmentType(file), data, name: displayName });
-      } catch {
-        toast.error(`Failed to read ${displayName}`);
-      } finally {
-        adjustPendingAttachmentReads(originChatId, -1);
-      }
-    }
-  }, [adjustPendingAttachmentReads, appendAttachmentForChat]);
+    },
+    [adjustPendingAttachmentReads, appendAttachmentForChat],
+  );
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
@@ -985,9 +988,7 @@ export function ConversationInput({
         setInputDraft(submittingChatId, submittedDraft);
       }
       const msg = error instanceof Error ? error.message : "Failed to post message";
-      toast.error(
-        rollbackFailed ? `${msg}; the partial message may need to be removed before retrying.` : msg,
-      );
+      toast.error(rollbackFailed ? `${msg}; the partial message may need to be removed before retrying.` : msg);
     }
   }, [
     activeChatId,
@@ -1021,85 +1022,82 @@ export function ConversationInput({
     }
     const text = textareaRef.current?.value?.trim() ?? "";
     if (!text) return;
-    await runQuickSlashCommand(`/narrator ${text}`, "Guided generation failed");
+    await runQuickSlashCommand(`/guided ${text}`, "Guided generation failed");
   }, [activeChatId, isStreaming, requiresManualGuideTarget, hasPendingAttachments, runQuickSlashCommand]);
 
-  const quickReplyActions = useMemo<QuickReplyAction[]>(
-    () => {
-      const actions: QuickReplyAction[] = [];
-      const getPostOnlyDisabledReason = () => {
-        if (!activeChatId) return "Select or create a chat first.";
-        if (isStreaming) return "Wait for the current stream to finish.";
-        if (isReadingAttachments) return "Still reading attached files.";
-        if (!hasInput && attachments.length === 0) return "Type a draft first.";
-        return undefined;
-      };
-      const getGuideDisabledReason = () => {
-        if (!activeChatId) return "Select or create a chat first.";
-        if (isStreaming) return "Wait for the current stream to finish.";
-        if (requiresManualGuideTarget) return "Choose a character from the reply picker.";
-        if (hasPendingAttachments) return "Clear or post attachments first.";
-        if (!hasInput) return "Type a direction first.";
-        return undefined;
-      };
-      const getImpersonateDisabledReason = () => {
-        if (!activeChatId) return "Select or create a chat first.";
-        if (isStreaming) return "Wait for the current stream to finish.";
-        if (hasPendingAttachments) return "Clear or post attachments first.";
-        if (!hasInput) return "Type a direction first.";
-        return undefined;
-      };
-      if (showQuickReplyPostOnly) {
-        actions.push({
-          id: "post-only",
-          label: "Post only",
-          description: "Add your message without a reply",
-          icon: <FileText size="0.875rem" />,
-          disabled: !activeChatId || isStreaming || isReadingAttachments || (!hasInput && attachments.length === 0),
-          disabledReason: getPostOnlyDisabledReason(),
-          onSelect: handlePostOnlyButton,
-        });
-      }
-      if (showQuickReplyGuide) {
-        actions.push({
-          id: "guide-reply",
-          label: "Guide reply",
-          description: "Send as /narrator direction",
-          icon: <WandSparkles size="0.875rem" />,
-          disabled: !activeChatId || isStreaming || requiresManualGuideTarget || !hasInput || hasPendingAttachments,
-          disabledReason: getGuideDisabledReason(),
-          onSelect: handleGuidedGenerationButton,
-        });
-      }
-      if (showQuickReplyImpersonate) {
-        actions.push({
-          id: "impersonate",
-          label: "Impersonate",
-          description: "Generate as your persona",
-          icon: <UserCheck size="0.875rem" />,
-          disabled: !activeChatId || isStreaming || !hasInput || hasPendingAttachments,
-          disabledReason: getImpersonateDisabledReason(),
-          onSelect: handleImpersonateQuickButton,
-        });
-      }
-      return actions;
-    },
-    [
-      activeChatId,
-      isStreaming,
-      isReadingAttachments,
-      hasInput,
-      attachments.length,
-      hasPendingAttachments,
-      requiresManualGuideTarget,
-      showQuickReplyPostOnly,
-      showQuickReplyGuide,
-      showQuickReplyImpersonate,
-      handlePostOnlyButton,
-      handleGuidedGenerationButton,
-      handleImpersonateQuickButton,
-    ],
-  );
+  const quickReplyActions = useMemo<QuickReplyAction[]>(() => {
+    const actions: QuickReplyAction[] = [];
+    const getPostOnlyDisabledReason = () => {
+      if (!activeChatId) return "Select or create a chat first.";
+      if (isStreaming) return "Wait for the current stream to finish.";
+      if (isReadingAttachments) return "Still reading attached files.";
+      if (!hasInput && attachments.length === 0) return "Type a draft first.";
+      return undefined;
+    };
+    const getGuideDisabledReason = () => {
+      if (!activeChatId) return "Select or create a chat first.";
+      if (isStreaming) return "Wait for the current stream to finish.";
+      if (requiresManualGuideTarget) return "Choose a character from the reply picker.";
+      if (hasPendingAttachments) return "Clear or post attachments first.";
+      if (!hasInput) return "Type a direction first.";
+      return undefined;
+    };
+    const getImpersonateDisabledReason = () => {
+      if (!activeChatId) return "Select or create a chat first.";
+      if (isStreaming) return "Wait for the current stream to finish.";
+      if (hasPendingAttachments) return "Clear or post attachments first.";
+      if (!hasInput) return "Type a direction first.";
+      return undefined;
+    };
+    if (showQuickReplyPostOnly) {
+      actions.push({
+        id: "post-only",
+        label: "Post only",
+        description: "Add your message without a reply",
+        icon: <FileText size="0.875rem" />,
+        disabled: !activeChatId || isStreaming || isReadingAttachments || (!hasInput && attachments.length === 0),
+        disabledReason: getPostOnlyDisabledReason(),
+        onSelect: handlePostOnlyButton,
+      });
+    }
+    if (showQuickReplyGuide) {
+      actions.push({
+        id: "guide-reply",
+        label: "Guide reply",
+        description: "Send as /guided direction",
+        icon: <WandSparkles size="0.875rem" />,
+        disabled: !activeChatId || isStreaming || requiresManualGuideTarget || !hasInput || hasPendingAttachments,
+        disabledReason: getGuideDisabledReason(),
+        onSelect: handleGuidedGenerationButton,
+      });
+    }
+    if (showQuickReplyImpersonate) {
+      actions.push({
+        id: "impersonate",
+        label: "Impersonate",
+        description: "Generate as your persona",
+        icon: <UserCheck size="0.875rem" />,
+        disabled: !activeChatId || isStreaming || !hasInput || hasPendingAttachments,
+        disabledReason: getImpersonateDisabledReason(),
+        onSelect: handleImpersonateQuickButton,
+      });
+    }
+    return actions;
+  }, [
+    activeChatId,
+    isStreaming,
+    isReadingAttachments,
+    hasInput,
+    attachments.length,
+    hasPendingAttachments,
+    requiresManualGuideTarget,
+    showQuickReplyPostOnly,
+    showQuickReplyGuide,
+    showQuickReplyImpersonate,
+    handlePostOnlyButton,
+    handleGuidedGenerationButton,
+    handleImpersonateQuickButton,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
