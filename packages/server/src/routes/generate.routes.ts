@@ -16,6 +16,7 @@ import {
   LOCAL_SIDECAR_CONNECTION_ID,
   resolveMacros,
   resolveDeferredCharacterMacros,
+  hasDeferredCharacterMacros,
   LIMITS,
   coerceGameStateTextValue,
 } from "@marinara-engine/shared";
@@ -6088,6 +6089,17 @@ export async function generateRoutes(app: FastifyInstance) {
             : message.content
           ).replace(/\n([ \t]*\n){2,}/g, "\n\n"),
         }));
+        if (
+          deferCharacterMacros &&
+          preparedMessagesForGen.some((message) => hasDeferredCharacterMacros(message.content))
+        ) {
+          logger.error(
+            { chatId: input.chatId, targetCharId },
+            "[generate] Deferred character macro placeholder remained before provider request",
+          );
+          sendSseEvent(reply, { type: "error", data: "Prompt preparation failed before generation" });
+          return null;
+        }
 
         const toProviderMessages = (
           promptMessages: Array<{

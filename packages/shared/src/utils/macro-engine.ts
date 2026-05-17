@@ -64,6 +64,8 @@ export interface SupportedMacroDefinition {
 const CHARACTER_MACRO_PATTERN =
   /\{\{(?:char|charName|description|personality|backstory|appearance|scenario|example)\}\}/i;
 const MAX_CHARACTER_FIELD_RESOLUTION_DEPTH = 4;
+// Private placeholders used while character macros are deferred.
+// Internal-only and should be resolved before provider requests.
 const DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX = "\x1eMARINARA_DEFERRED_CHARACTER_";
 const DEFERRED_CHARACTER_MACRO_TOKENS = {
   char: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}CHAR\x1f`,
@@ -77,6 +79,10 @@ const DEFERRED_CHARACTER_MACRO_TOKENS = {
 
 export type CharacterMacroProfile = NonNullable<MacroContext["characterProfiles"]>[number];
 type CharacterFieldMacroName = Exclude<keyof typeof DEFERRED_CHARACTER_MACRO_TOKENS, "char">;
+
+export function hasDeferredCharacterMacros(template: string): boolean {
+  return template.includes(DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX);
+}
 
 export const SUPPORTED_MACROS: readonly SupportedMacroDefinition[] = [
   { category: "Identity", syntax: "{{user}}", description: "Current user or persona name" },
