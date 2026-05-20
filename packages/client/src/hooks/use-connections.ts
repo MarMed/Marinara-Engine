@@ -120,9 +120,16 @@ export function useTestImageGeneration() {
   });
 }
 
+export type RemoteConnectionModel = {
+  id: string;
+  name: string;
+  context?: number;
+  maxOutput?: number;
+};
+
 export function useFetchModels() {
   return useMutation({
-    mutationFn: (id: string) => api.get<{ models: Array<{ id: string; name: string }> }>(`/connections/${id}/models`),
+    mutationFn: (id: string) => api.get<{ models: RemoteConnectionModel[] }>(`/connections/${id}/models`),
   });
 }
 

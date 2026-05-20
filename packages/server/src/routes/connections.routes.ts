@@ -893,6 +893,29 @@ export async function connectionsRoutes(app: FastifyInstance) {
 interface RemoteModel {
   id: string;
   name: string;
+  context?: number;
+  maxOutput?: number;
+}
+
+function readProviderMetadataRecord(value: unknown): Record<string, unknown> | null {
+  return !!value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function readOpenAICompatibleModelLimits(model: Record<string, unknown>): Pick<RemoteModel, "context" | "maxOutput"> {
+  const topProvider = readProviderMetadataRecord(model.top_provider);
+  const context = readPositiveInteger(model.context_length) ?? readPositiveInteger(topProvider?.context_length);
+  const maxOutput =
+    readPositiveInteger(topProvider?.max_completion_tokens) ?? readPositiveInteger(model.max_completion_tokens);
+
+  return {
+    ...(context ? { context } : {}),
+    ...(maxOutput ? { maxOutput } : {}),
+  };
 }
 
 function normalizeModelsResponse(provider: string, json: Record<string, unknown>): RemoteModel[] {
@@ -972,14 +995,12 @@ function normalizeModelsResponse(provider: string, json: Record<string, unknown>
     default: {
       // OpenAI-compatible: { data: [{ id: "gpt-4o", ... }] }
       // This covers openai, mistral, openrouter, custom
-      const data = (json.data ?? []) as Array<{
-        id?: string;
-        name?: string;
-      }>;
+      const data = (json.data ?? []) as Array<Record<string, unknown> & { id?: string; name?: string }>;
       return data
         .map((m) => ({
           id: m.id ?? "",
           name: m.name ?? m.id ?? "",
+          ...readOpenAICompatibleModelLimits(m),
         }))
         .filter((m) => m.id);
     }

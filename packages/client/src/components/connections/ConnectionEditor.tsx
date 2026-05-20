@@ -16,6 +16,7 @@ import {
   useFetchModels,
   useSaveConnectionDefaults,
   type ClaudeSubscriptionDiagnosis,
+  type RemoteConnectionModel,
 } from "../../hooks/use-connections";
 import { usePresets } from "../../hooks/use-presets";
 import {
@@ -230,7 +231,7 @@ export function ConnectionEditor() {
   }, [showModelDropdown]);
 
   // Remote models fetched from provider API
-  const [remoteModels, setRemoteModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [remoteModels, setRemoteModels] = useState<RemoteConnectionModel[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Populate from server
@@ -361,12 +362,16 @@ export function ConnectionEditor() {
 
   // Merge known models with remote models (remote first, deduped)
   const allModels = useMemo(() => {
-    const knownIds = new Set(providerModels.map((m) => m.id));
-    const uniqueRemote = remoteModels
-      .filter((m) => !knownIds.has(m.id))
-      .map((m) => ({ id: m.id, name: m.name, context: 0, maxOutput: 0, isRemote: true as const }));
-    const known = providerModels.map((m) => ({ ...m, isRemote: false as const }));
-    return [...known, ...uniqueRemote];
+    const remote = remoteModels.map((m) => ({
+      id: m.id,
+      name: m.name,
+      context: m.context ?? 0,
+      maxOutput: m.maxOutput ?? 0,
+      isRemote: true as const,
+    }));
+    const remoteIds = new Set(remote.map((m) => m.id));
+    const known = providerModels.filter((m) => !remoteIds.has(m.id)).map((m) => ({ ...m, isRemote: false as const }));
+    return [...remote, ...known];
   }, [providerModels, remoteModels]);
 
   const filteredModels = useMemo(() => {
@@ -376,8 +381,8 @@ export function ConnectionEditor() {
   }, [allModels, modelSearch]);
 
   const selectedModelInfo = useMemo(() => {
-    return providerModels.find((m) => m.id === localModel) ?? null;
-  }, [providerModels, localModel]);
+    return allModels.find((m) => m.id === localModel) ?? null;
+  }, [allModels, localModel]);
 
   // Clear remote models when provider changes
   useEffect(() => {
@@ -617,7 +622,7 @@ export function ConnectionEditor() {
     }
     fetchModels.mutate(connectionDetailId, {
       onSuccess: (data) => {
-        const result = data as { models: Array<{ id: string; name: string }> };
+        const result = data as { models: RemoteConnectionModel[] };
         setRemoteModels(result.models);
         setShowModelDropdown(true);
         requestAnimationFrame(() => {
@@ -631,9 +636,10 @@ export function ConnectionEditor() {
     });
   }, [connectionDetailId, dirty, handleSave, fetchModels]);
 
-  const selectModel = useCallback((model: { id: string; context?: number }) => {
+  const selectModel = useCallback((model: { id: string; context?: number; maxOutput?: number; isRemote?: boolean }) => {
     setLocalModel(model.id);
     if (model.context) setLocalMaxContext(Number(model.context));
+    if (model.isRemote && model.maxOutput) setLocalMaxTokensOverride(Number(model.maxOutput));
     setShowModelDropdown(false);
     setModelSearch("");
     setDirty(true);
@@ -1247,7 +1253,7 @@ export function ConnectionEditor() {
                               .map((m) => (
                                 <button
                                   key={m.id}
-                                  onClick={() => selectModel({ id: m.id })}
+                                  onClick={() => selectModel({ ...m, isRemote: true })}
                                   className={cn(
                                     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--accent)]",
                                     localModel === m.id && "bg-sky-400/5",
