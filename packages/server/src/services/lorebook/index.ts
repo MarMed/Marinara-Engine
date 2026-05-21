@@ -33,7 +33,7 @@ export interface LorebookScanResult {
   totalTokensEstimate: number;
   activatedEntryIds: string[];
   activatedEntries: Array<{ id: string; content: string; matchedKeys: string[] }>;
-  budgetSkippedEntries: Array<{ id: string; matchedKeys: string[] }>;
+  budgetSkippedEntries: LorebookBudgetSkippedEntry[];
   /** Updated per-chat entry state overrides (ephemeral countdown). Caller should persist to chat metadata. */
   updatedEntryStateOverrides?: Record<string, { ephemeral?: number | null; enabled?: boolean }>;
   /** Updated per-chat timing states for sticky/cooldown/delay. Caller should persist to chat metadata. */
@@ -319,6 +319,8 @@ function resolveFinalLorebookContent(
 function lorebookSelectionOrder(a: ActivatedEntry, b: ActivatedEntry): number {
   if (a.entry.constant && !b.entry.constant) return -1;
   if (!a.entry.constant && b.entry.constant) return 1;
+  if (a.matchedLatestUserMessage && !b.matchedLatestUserMessage) return -1;
+  if (!a.matchedLatestUserMessage && b.matchedLatestUserMessage) return 1;
   return a.injectionOrder - b.injectionOrder;
 }
 
@@ -921,7 +923,16 @@ export async function processLorebooks(
     })),
     budgetSkippedEntries: budgetResult.budgetSkippedEntries.map((entry) => ({
       id: entry.id,
+      name: entry.name,
+      lorebookId: entry.lorebookId,
+      lorebookName: entry.lorebookName,
       matchedKeys: entry.matchedKeys,
+      estimatedTokens: entry.estimatedTokens,
+      lorebookBudget: entry.lorebookBudget,
+      lorebookUsedTokens: entry.lorebookUsedTokens,
+      chatBudget: entry.chatBudget,
+      chatUsedTokens: entry.chatUsedTokens,
+      blockedBy: entry.blockedBy,
     })),
     ...(updatedOverrides ? { updatedEntryStateOverrides: updatedOverrides } : {}),
     ...(updatedEntryTimingStates ? { updatedEntryTimingStates } : {}),
