@@ -202,6 +202,7 @@ import {
 } from "./generate/lorebook-keeper-utils.js";
 import { registerDryRunRoute } from "./generate/dry-run-route.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
+import { fingerprintChatSummary } from "../services/prompt/chat-summary-fingerprint.js";
 import { sendSseEvent, startSseReply, trySendSseEvent } from "./generate/sse.js";
 import {
   buildDefaultAgentConnectionWarning,
@@ -1498,6 +1499,21 @@ function removeMarkdownCharacterBlocks(content: string, characterNames: string[]
   return kept.join("\n");
 }
 
+type CharacterPromptScopeInfo = {
+  id: string;
+  name: string;
+  description?: string;
+  personality?: string;
+  scenario?: string;
+  systemPrompt?: string;
+  backstory?: string;
+  appearance?: string;
+  mesExample?: string;
+  postHistoryInstructions?: string;
+};
+
+const PROFILE_SNIPPET_MIN_LENGTH = 20;
+
 function removeOtherCharacterProfileBlocks(content: string, otherCharacterNames: string[]): string {
   if (!otherCharacterNames.length) return content;
   let result = content;
@@ -1505,6 +1521,55 @@ function removeOtherCharacterProfileBlocks(content: string, otherCharacterNames:
     result = removeXmlCharacterBlocks(result, name);
   }
   result = removeMarkdownCharacterBlocks(result, otherCharacterNames);
+  return result.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function removeExactPromptSnippet(content: string, snippet: string): string {
+  const normalizedSnippet = snippet.replace(/\r\n?/g, "\n").trim();
+  if (normalizedSnippet.length < PROFILE_SNIPPET_MIN_LENGTH) return content;
+
+  const escapedLines = normalizedSnippet
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(escapeRegExp);
+
+  if (escapedLines.length === 0) return content;
+
+  const snippetPattern = escapedLines.join("[ \\t]*\\r?\\n[ \\t]*");
+  const pattern = new RegExp(`\\n?[ \\t]*${snippetPattern}[ \\t]*(?=\\r?\\n|$)`, "g");
+  return content.replace(pattern, "\n");
+}
+
+function removeOtherCharacterProfileContent(content: string, otherCharacters: CharacterPromptScopeInfo[]): string {
+  if (otherCharacters.length === 0) return content;
+
+  const blockScoped = removeOtherCharacterProfileBlocks(
+    content,
+    otherCharacters.map((character) => character.name),
+  );
+  const blockScopedBaseline = content.replace(/\n{3,}/g, "\n\n").trim();
+
+  // Wrapped character markers are the normal path. If they matched, avoid an
+  // extra exact-text pass so shared scenario text on the target card survives.
+  if (blockScoped !== blockScopedBaseline) return blockScoped;
+
+  let result = content;
+  for (const character of otherCharacters) {
+    for (const value of [
+      character.description,
+      character.personality,
+      character.scenario,
+      character.systemPrompt,
+      character.backstory,
+      character.appearance,
+      character.mesExample,
+      character.postHistoryInstructions,
+    ]) {
+      if (value) result = removeExactPromptSnippet(result, value);
+    }
+  }
+
   return result.replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -1592,14 +1657,12 @@ function reassignHistoryLastMessageWrapper(messages: GenerationPromptMessage[]):
 function scopeIndividualGroupMessagesForTarget(
   messages: GenerationPromptMessage[],
   targetCharacterId: string | null,
-  characters: Array<{ id: string; name: string }>,
+  characters: CharacterPromptScopeInfo[],
 ): GenerationPromptMessage[] {
   if (!targetCharacterId) return messages;
   const targetCharacter = characters.find((character) => character.id === targetCharacterId);
   if (!targetCharacter) return messages;
-  const otherCharacterNames = characters
-    .filter((character) => character.id !== targetCharacterId)
-    .map((character) => character.name);
+  const otherCharacters = characters.filter((character) => character.id !== targetCharacterId);
 
   const scoped = messages
     .map((message) => {
@@ -1609,7 +1672,7 @@ function scopeIndividualGroupMessagesForTarget(
         (next.contextKind === undefined && next.role !== "system" && next.characterId != null);
 
       if (!isHistoryMessage) {
-        const content = removeOtherCharacterProfileBlocks(next.content, otherCharacterNames);
+        const content = removeOtherCharacterProfileContent(next.content, otherCharacters);
         next = { ...next, content };
       }
 
@@ -7966,6 +8029,7 @@ export async function generateRoutes(app: FastifyInstance) {
               extraUpdate.generationReplay = buildGenerationReplay(input);
               // Cache the final prompt (what was actually sent to the model) for Peek Prompt
               extraUpdate.cachedPrompt = finalPromptSent.map((m) => ({ role: m.role, content: m.content }));
+              extraUpdate.chatSummaryFingerprint = fingerprintChatSummary(chatMeta.summary);
               const persistentAttachments = resolveUserRegenerationPersistentAttachments(regenMsg ?? {});
               if (persistentAttachments) extraUpdate.attachments = persistentAttachments;
               await chats.updateMessageExtra(savedMsg.id, extraUpdate);

@@ -157,6 +157,11 @@ async function readSettingsResponseError(res: Response, fallback: string) {
 
 const ROLEPLAY_AVATAR_STYLE_OPTIONS: Array<{ id: RoleplayAvatarStyle; label: string; desc: string }> = [
   {
+    id: "none",
+    label: "None",
+    desc: "Hide message avatars and let roleplay bubbles use the full row.",
+  },
+  {
     id: "circles",
     label: "Small Circles",
     desc: "Compact portrait bubbles beside each roleplay message.",
@@ -1689,7 +1694,7 @@ function AppearanceSettings() {
         <div className="flex items-center gap-1.5">
           <Image size="0.75rem" className="text-[var(--muted-foreground)]" />
           <span className="text-xs font-medium">Roleplay Avatars</span>
-          <HelpTooltip text="Choose how avatars sit next to roleplay messages. Small Circles keeps the current compact layout. Small Rectangles keeps avatars beside the bubble but gives portraits a taller frame. Glued Side Panel embeds a larger portrait strip into the message bubble itself." />
+          <HelpTooltip text="Choose how avatars sit next to roleplay messages. None hides message avatars. Small Circles keeps the current compact layout. Small Rectangles gives portraits a taller frame. Glued Side Panel embeds a larger portrait strip into the message bubble itself." />
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {ROLEPLAY_AVATAR_STYLE_OPTIONS.map((opt) => (
@@ -1704,7 +1709,14 @@ function AppearanceSettings() {
               )}
             >
               <div className="w-full overflow-hidden rounded-md bg-[var(--secondary)]/80 ring-1 ring-[var(--border)]/70">
-                {opt.id === "circles" ? (
+                {opt.id === "none" ? (
+                  <div className="flex h-14 items-center px-3">
+                    <div className="flex-1 rounded-2xl bg-black/25 px-3 py-2">
+                      <div className="h-1.5 w-16 rounded-full bg-white/20" />
+                      <div className="mt-1.5 h-1.5 w-24 rounded-full bg-white/12" />
+                    </div>
+                  </div>
+                ) : opt.id === "circles" ? (
                   <div className="flex h-14 items-center px-3">
                     <div className="relative flex-1 rounded-2xl rounded-tl-sm bg-black/25 px-3 py-2">
                       <div className="absolute left-2 top-2 h-2.5 w-2.5 rounded-full bg-gradient-to-br from-rose-400 to-orange-300 shadow-[0_0_0_2px_rgba(255,255,255,0.16)]" />
@@ -1724,7 +1736,7 @@ function AppearanceSettings() {
                   </div>
                 ) : (
                   <div className="flex h-14 items-stretch overflow-hidden">
-                    <div className="relative w-14 overflow-hidden border-r border-white/8 bg-gradient-to-b from-rose-400/60 via-orange-300/45 to-transparent">
+                    <div className="relative w-20 overflow-hidden border-r border-white/8 bg-gradient-to-b from-rose-400/60 via-orange-300/45 to-transparent">
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[32%] backdrop-blur-[4px] [mask-image:linear-gradient(to_bottom,transparent_0%,rgba(0,0,0,0.25)_28%,rgba(0,0,0,0.8)_100%)] [-webkit-mask-image:linear-gradient(to_bottom,transparent_0%,rgba(0,0,0,0.25)_28%,rgba(0,0,0,0.8)_100%)]" />
                       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0)_0%,rgba(255,255,255,0)_72%,rgba(113,113,122,0.84)_92%,rgba(113,113,122,1)_100%)]" />
                     </div>
@@ -1743,28 +1755,34 @@ function AppearanceSettings() {
         <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/45 p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="flex h-20 w-full shrink-0 items-end justify-center gap-3 overflow-hidden rounded-md bg-black/30 ring-1 ring-[var(--border)]/70 sm:w-28">
-              <div
-                className={cn(
-                  "mb-2 border border-white/20 bg-gradient-to-b from-rose-300/85 via-fuchsia-300/65 to-slate-900/90 shadow-lg transition-all",
-                  roleplayAvatarStyle === "circles"
-                    ? "rounded-full"
-                    : roleplayAvatarStyle === "rectangles"
-                      ? "rounded-xl"
-                      : "rounded-md",
-                )}
-                style={{
-                  width: `${
-                    roleplayAvatarStyle === "panel"
-                      ? Math.min(5.5, 2.2 * roleplayAvatarScale)
-                      : Math.min(5.5, (roleplayAvatarStyle === "rectangles" ? 2.15 : 2) * roleplayAvatarScale)
-                  }rem`,
-                  height: `${
+              {roleplayAvatarStyle === "none" ? (
+                <div className="mb-2 flex h-10 min-w-20 items-center justify-center rounded-md border border-dashed border-white/20 px-2 text-[0.625rem] font-medium text-white/35">
+                  No avatars
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "mb-2 border border-white/20 bg-gradient-to-b from-rose-300/85 via-fuchsia-300/65 to-slate-900/90 shadow-lg transition-all",
                     roleplayAvatarStyle === "circles"
-                      ? Math.min(5.5, 2 * roleplayAvatarScale)
-                      : Math.min(6, (roleplayAvatarStyle === "rectangles" ? 2.7 : 3.4) * roleplayAvatarScale)
-                  }rem`,
-                }}
-              />
+                      ? "rounded-full"
+                      : roleplayAvatarStyle === "rectangles"
+                        ? "rounded-xl"
+                        : "rounded-md",
+                  )}
+                  style={{
+                    width: `${
+                      roleplayAvatarStyle === "panel"
+                        ? Math.min(6.5, 2.6 * roleplayAvatarScale)
+                        : Math.min(5.5, (roleplayAvatarStyle === "rectangles" ? 2.15 : 2) * roleplayAvatarScale)
+                    }rem`,
+                    height: `${
+                      roleplayAvatarStyle === "circles"
+                        ? Math.min(5.5, 2 * roleplayAvatarScale)
+                        : Math.min(6, (roleplayAvatarStyle === "rectangles" ? 2.7 : 3.4) * roleplayAvatarScale)
+                    }rem`,
+                  }}
+                />
+              )}
               <div
                 className="mb-1 rounded-full border border-white/20 bg-gradient-to-b from-violet-200/85 via-purple-200/70 to-slate-900/95 shadow-lg transition-all"
                 style={{

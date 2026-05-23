@@ -46,10 +46,10 @@ Copy `.env.example` to `.env` when you need to change ports, HTTPS settings, or 
 
 Marinara Engine uses two long-lived branches:
 
-| Branch    | Role                                                                                                |
-| --------- | --------------------------------------------------------------------------------------------------- |
-| `staging` | Active development. All feature branches, bug fixes, and documentation PRs should target this.     |
-| `main`    | Release branch. Updated by maintainers as part of the release flow; do not target it directly.     |
+| Branch    | Role                                                                                           |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| `staging` | Active development. All feature branches, bug fixes, and documentation PRs should target this. |
+| `main`    | Release branch. Updated by maintainers as part of the release flow; do not target it directly. |
 
 Guidelines:
 
@@ -145,6 +145,12 @@ All server-side logging goes through a shared [Pino](https://getpino.io/) logger
 3. **Don't trust AI-checked boxes.** If an AI agent ticked the test-plan checkboxes, treat them as your to-do list, not proof of testing. Verify each item in a real browser before submitting; untick anything you haven't personally confirmed.
 
 4. **Smaller and working beats big and broken.** We'd rather review a tight PR that works on the first try than a large one that needs multiple rounds of fixes.
+
+## AI Agent Workflow
+
+AI coding agents should use `.github/agents/chai-workflow.md` as an additive workflow overlay. It adapts the Chai Agent Workflow Pack for Marinara's branch, issue, PR, validation, and risky-work expectations.
+
+The overlay is not a substitute for this guide. When instructions conflict, follow this file, `AGENTS.md`, package-specific instructions, and maintainer requests first. The overlay is mainly a proof and coordination layer: reproduce before fixing when practical, verify the user-facing claim before saying done, keep PR/issue text exact, leave PR checkboxes unchecked for humans, and call out risky-work proof gaps honestly.
 
 ## Pull Request Expectations
 

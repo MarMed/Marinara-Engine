@@ -30,7 +30,7 @@ export type TrackerPanelCollapsedSections = Partial<Record<TrackerDataPanelSecti
 export type TrackerPanelSectionOrder = TrackerDataPanelSection[];
 export type EchoChamberSide = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export type UserStatus = "active" | "idle" | "dnd";
-export type RoleplayAvatarStyle = "circles" | "rectangles" | "panel";
+export type RoleplayAvatarStyle = "none" | "circles" | "rectangles" | "panel";
 export type GameDialogueDisplayMode = "classic" | "stacked";
 export type SummaryPopoverSourceMode = "last" | "range";
 export interface FloatingWidgetPosition {

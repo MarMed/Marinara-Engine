@@ -1317,6 +1317,7 @@ export const ChatMessage = memo(function ChatMessage({
   const swipeCount = message.swipeCount ?? 0;
   const hasSwipes = swipeCount > 1;
 
+  const hideRoleplayAvatars = isRoleplay && roleplayAvatarStyle === "none";
   const useCompactRectangleAvatar = isRoleplay && roleplayAvatarStyle === "rectangles";
   const compactAvatarFrameClass = useCompactRectangleAvatar
     ? "h-[calc(3.5rem*var(--roleplay-avatar-scale))] w-[calc(2.75rem*var(--roleplay-avatar-scale))] rounded-xl"
@@ -1363,6 +1364,7 @@ export const ChatMessage = memo(function ChatMessage({
     ? `${Math.max(1, Math.min(1.75, 1.125 * roleplayAvatarScale))}rem`
     : `${Math.max(0.875, Math.min(1.5, roleplayAvatarScale))}rem`;
   const showRoleplayAvatarPanel = isRoleplay && roleplayAvatarStyle === "panel" && !isGrouped;
+  const showCompactRoleplayAvatar = isRoleplay && !isGrouped && !hideRoleplayAvatars && !showRoleplayAvatarPanel;
   const roleplayAvatarPanelTail = showRoleplayAvatarPanel ? (
     isMergedGroup && mergedAvatars.length > 0 ? (
       <div className="rpg-avatar-panel-tail absolute inset-0 pointer-events-none overflow-hidden">
@@ -1596,7 +1598,7 @@ export const ChatMessage = memo(function ChatMessage({
             </div>
           )}
           {/* Avatar Column */}
-          {!isGrouped && !showRoleplayAvatarPanel && (
+          {showCompactRoleplayAvatar && (
             <div className="mari-message-avatar flex flex-col items-center flex-shrink-0 pt-1">
               {isMergedGroup && mergedAvatars.length > 0 ? (
                 <button
@@ -1673,7 +1675,7 @@ export const ChatMessage = memo(function ChatMessage({
           )}
 
           {/* Spacer if grouped (no avatar) */}
-          {isGrouped && <div className={cn("flex-shrink-0", compactAvatarSpacerClass)} />}
+          {isGrouped && !hideRoleplayAvatars && <div className={cn("flex-shrink-0", compactAvatarSpacerClass)} />}
 
           {/* Content */}
           <div
@@ -1706,9 +1708,11 @@ export const ChatMessage = memo(function ChatMessage({
                     {genLabel}
                   </span>
                 )}
-                {showRoleplayAvatarPanel && (showActions || showMessageNumbers) && messageIndex != null && (
-                  <span className="text-[0.5625rem] font-medium text-white/25 select-none">#{messageIndex}</span>
-                )}
+                {(showRoleplayAvatarPanel || hideRoleplayAvatars) &&
+                  (showActions || showMessageNumbers) &&
+                  messageIndex != null && (
+                    <span className="text-[0.5625rem] font-medium text-white/25 select-none">#{messageIndex}</span>
+                  )}
               </div>
             )}
 
@@ -1745,11 +1749,14 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className={cn("flex min-h-full items-stretch", isUser && "flex-row-reverse")}>
                   <div
                     className={cn(
-                      "relative flex w-[calc(4.75rem*var(--roleplay-avatar-scale))] shrink-0 items-start self-stretch overflow-hidden md:w-[calc(5.25rem*var(--roleplay-avatar-scale))]",
+                      "relative flex w-[calc(5.5rem*var(--roleplay-avatar-scale))] shrink-0 items-start self-stretch overflow-hidden md:w-[calc(6rem*var(--roleplay-avatar-scale))]",
                       isUser ? "border-l border-white/8" : "border-r border-white/8",
+                      isUser
+                        ? "bg-gradient-to-b from-neutral-500/18 via-neutral-600/10 to-transparent"
+                        : "bg-gradient-to-b from-purple-500/18 via-pink-600/10 to-transparent",
                     )}
                   >
-                    <div className="rpg-avatar-panel-stack relative h-full max-h-[calc(11rem*var(--roleplay-avatar-scale))] w-full overflow-hidden">
+                    <div className="rpg-avatar-panel-stack absolute left-0 top-0 h-[calc(11rem*var(--roleplay-avatar-scale))] w-full overflow-hidden">
                       {isMergedGroup && mergedAvatars.length > 0 ? (
                         <button
                           type="button"

@@ -1,21 +1,7 @@
 // ──────────────────────────────────────────────
 // Layout: Top Bar (polished, with hover glow)
 // ──────────────────────────────────────────────
-import {
-  PanelLeft,
-  Home,
-  Settings,
-  Link,
-  BookOpen,
-  Users,
-  Sparkles,
-  FileText,
-  User,
-  Bot,
-  MessageSquare,
-  Drama,
-  Theater,
-} from "lucide-react";
+import { PanelLeft, Home, Settings, Link, BookOpen, Users, Sparkles, FileText, User, Bot } from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useAgentStore } from "../../stores/agent.store";
@@ -30,31 +16,9 @@ const RIGHT_PANEL_BUTTONS = [
   { panel: "personas" as const, icon: User, label: "Personas", color: "from-emerald-400 to-teal-500" },
 ] as const;
 
-const CHAT_MODE_SHORTCUTS = [
-  {
-    mode: "conversation" as const,
-    icon: MessageSquare,
-    label: "Conversations",
-    shortLabel: "Chats",
-  },
-  {
-    mode: "roleplay" as const,
-    icon: Drama,
-    label: "Roleplay",
-    shortLabel: "RP",
-  },
-  {
-    mode: "game" as const,
-    icon: Theater,
-    label: "Games",
-    shortLabel: "Games",
-  },
-] as const;
-
 export function TopBar() {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel);
-  const requestChatModeShortcut = useUIStore((s) => s.requestChatModeShortcut);
   const rightPanel = useUIStore((s) => s.rightPanel);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
@@ -95,26 +59,6 @@ export function TopBar() {
         </button>
         <SpotifyMiniPlayer />
       </div>
-
-      {/* Center section - fixed chat-mode shortcuts */}
-      <nav
-        aria-label="Chat mode shortcuts"
-        className="hidden shrink-0 items-center gap-1 rounded-xl bg-[var(--secondary)]/35 p-1 ring-1 ring-[var(--border)]/25 md:flex"
-      >
-        {CHAT_MODE_SHORTCUTS.map(({ mode, icon: Icon, label, shortLabel }) => (
-          <button
-            key={mode}
-            onClick={() => requestChatModeShortcut(mode)}
-            data-topbar-shortcut={mode}
-            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-[var(--muted-foreground)] transition-all duration-200 hover:bg-[var(--accent)] hover:text-[var(--primary)] active:scale-95"
-            title={label}
-          >
-            <Icon size="0.875rem" />
-            <span className="hidden xl:inline">{label}</span>
-            <span className="xl:hidden">{shortLabel}</span>
-          </button>
-        ))}
-      </nav>
 
       {/* Right section - Panel toggles */}
       <nav

@@ -1351,49 +1351,75 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const chatMessages = await storage.listMessages(req.params.id);
     const chatMeta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+    const chatMode = (chat.mode as string) ?? "roleplay";
     const chatSummaryFingerprint = fingerprintChatSummary(chatMeta.summary);
     const visibleGameStateAnchor = resolveVisibleGameStateAnchor(chatMessages);
+    const supportsHiddenFromAI = chatMode === "conversation" || chatMode === "roleplay" || chatMode === "visual_novel";
+
+    const readCachedPrompt = (
+      extra: Record<string, unknown>,
+    ): { messages: Array<{ role: string; content: string }>; generationInfo?: Record<string, unknown> } | null => {
+      const cachedPrompt = Array.isArray(extra.cachedPrompt)
+        ? extra.cachedPrompt
+            .map((entry) => {
+              if (!isRecord(entry) || typeof entry.role !== "string" || typeof entry.content !== "string") {
+                return null;
+              }
+              return { role: entry.role, content: entry.content };
+            })
+            .filter((entry): entry is { role: string; content: string } => entry !== null)
+        : [];
+      if (cachedPrompt.length === 0) return null;
+
+      // Newer prompt caches record the summary fingerprint used at generation time.
+      // Older v1.6.1-era caches did not; those are still exact debug-log prompts,
+      // so prefer them over the live best-effort fallback.
+      if (
+        Object.prototype.hasOwnProperty.call(extra, "chatSummaryFingerprint") &&
+        !chatSummaryFingerprintMatches(extra, chatSummaryFingerprint)
+      ) {
+        return null;
+      }
+
+      return {
+        messages: cachedPrompt,
+        generationInfo: isRecord(extra.generationInfo) ? extra.generationInfo : undefined,
+      };
+    };
 
     // ── Primary: return the cached prompt from the last generation ──
     // This is an exact copy of what was actually sent to the model,
     // including all runtime injections (lorebooks, game state, scene context, etc.).
-    for (let i = chatMessages.length - 1; i >= 0; i--) {
-      const m = chatMessages[i]! as any;
-      if (m.role === "assistant") {
-        let extra = typeof m.extra === "string" ? JSON.parse(m.extra) : (m.extra ?? {});
-        let cachedPrompt = chatSummaryFingerprintMatches(extra, chatSummaryFingerprint)
-          ? (extra.cachedPrompt as Array<{ role: string; content: string }> | undefined)
-          : undefined;
-        let generationInfo = extra.generationInfo as Record<string, unknown> | undefined;
+    const latestVisibleMessage = (() => {
+      for (let i = chatMessages.length - 1; i >= 0; i--) {
+        const message = chatMessages[i]!;
+        if (supportsHiddenFromAI && isMessageHiddenFromAI(message)) continue;
+        return message as any;
+      }
+      return null;
+    })();
 
-        // If message-level extra doesn't have it (swipe overwrite), check swipes
-        if (!cachedPrompt && m.id) {
-          const swipes = await storage.getSwipes(m.id);
-          const activeSwipe = swipes.find((s: any) => s.index === m.activeSwipeIndex);
-          if (activeSwipe) {
-            const swExtra =
-              typeof activeSwipe.extra === "string" ? JSON.parse(activeSwipe.extra) : (activeSwipe.extra ?? {});
-            if (chatSummaryFingerprintMatches(swExtra, chatSummaryFingerprint)) {
-              cachedPrompt = swExtra.cachedPrompt;
-              if (swExtra.generationInfo) generationInfo = swExtra.generationInfo;
-            }
-          }
-          if (!cachedPrompt) {
-            for (const sw of swipes) {
-              const swExtra = typeof sw.extra === "string" ? JSON.parse(sw.extra) : (sw.extra ?? {});
-              if (chatSummaryFingerprintMatches(swExtra, chatSummaryFingerprint) && swExtra.cachedPrompt) {
-                cachedPrompt = swExtra.cachedPrompt;
-                if (swExtra.generationInfo) generationInfo = swExtra.generationInfo;
-                break;
-              }
-            }
+    if (latestVisibleMessage?.role === "assistant") {
+      const extra = parseExtra(latestVisibleMessage.extra) as Record<string, unknown>;
+      let cached = readCachedPrompt(extra);
+
+      // If message-level extra doesn't have it (swipe overwrite), check swipes.
+      if (!cached && latestVisibleMessage.id) {
+        const swipes = await storage.getSwipes(latestVisibleMessage.id);
+        const activeSwipe = swipes.find((s: any) => s.index === latestVisibleMessage.activeSwipeIndex);
+        if (activeSwipe) {
+          cached = readCachedPrompt(parseExtra(activeSwipe.extra) as Record<string, unknown>);
+        }
+        if (!cached) {
+          for (const sw of swipes) {
+            cached = readCachedPrompt(parseExtra(sw.extra) as Record<string, unknown>);
+            if (cached) break;
           }
         }
+      }
 
-        if (cachedPrompt) {
-          return { messages: cachedPrompt, parameters: null, generationInfo: generationInfo ?? null };
-        }
-        break;
+      if (cached) {
+        return { messages: cached.messages, parameters: null, generationInfo: cached.generationInfo ?? null };
       }
     }
 
@@ -1412,17 +1438,20 @@ export async function chatsRoutes(app: FastifyInstance) {
         const preset = await presetStore.getById(presetId);
         if (preset) {
           // Apply conversation-start filter
-          let filteredMessages = chatMessages;
+          let scopedMessages = chatMessages;
           for (let i = chatMessages.length - 1; i >= 0; i--) {
             const extra =
               typeof chatMessages[i]!.extra === "string"
                 ? JSON.parse(chatMessages[i]!.extra as string)
                 : (chatMessages[i]!.extra ?? {});
             if (extra.isConversationStart) {
-              filteredMessages = chatMessages.slice(i);
+              scopedMessages = chatMessages.slice(i);
               break;
             }
           }
+          let filteredMessages = supportsHiddenFromAI
+            ? scopedMessages.filter((message: any) => !isMessageHiddenFromAI(message))
+            : scopedMessages;
 
           // Apply context message limit
           const contextLimit = chatMeta.contextMessageLimit as number | null;

@@ -2,6 +2,11 @@
 
 This file is a thin maintainer note for contributors using Codex. Canonical workflow, validation, and release guidance lives in `CONTRIBUTING.md`.
 
+## Agent Workflow Overlay
+
+- Follow `.github/agents/chai-workflow.md` as the repo's additive AI-agent workflow overlay for proof discipline, bugfix lanes, feature sizing, issue filing, PR gates, and risky-work claim boundaries.
+- The overlay does not replace this file, `CONTRIBUTING.md`, package instructions, or maintainer requests. Repo rules and the user's latest request still win.
+
 ## Preferred Workflow
 
 - Start with `pnpm install`.
