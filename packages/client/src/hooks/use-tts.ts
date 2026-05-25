@@ -35,9 +35,14 @@ export function useUpdateTTSConfig() {
 // ── Voices ───────────────────────────────────────
 
 export function useTTSVoices(source: TTSSource, baseUrl: string, enabled: boolean, model?: string) {
+  const queryParams = new URLSearchParams();
+  if (source) queryParams.set("source", source);
+  if (baseUrl) queryParams.set("baseUrl", baseUrl);
+  if (model) queryParams.set("model", model);
+
   return useQuery({
     queryKey: KEYS.voices(source, baseUrl, model),
-    queryFn: () => api.get<TTSVoicesResponse>("/tts/voices"),
+    queryFn: () => api.get<TTSVoicesResponse>(`/tts/voices?${queryParams.toString()}`),
     enabled: enabled && Boolean(baseUrl),
     staleTime: 5 * 60_000,
     retry: 1,

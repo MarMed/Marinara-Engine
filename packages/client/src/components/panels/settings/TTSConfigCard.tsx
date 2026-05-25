@@ -337,18 +337,17 @@ export function TTSConfigCard() {
   const [ttsState, setTTSState] = useState(ttsService.getState());
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  // Voice fetch — keyed on the *saved* baseUrl so it only refetches when saved
-  const savedSource = savedConfig?.source ?? "openai";
+  // Voice fetch — keyed on the draft/live states so it updates instantly
   const {
     data: voicesData,
     isFetching: fetchingVoices,
     refetch: refetchVoices,
     isError: voicesError,
   } = useTTSVoices(
-    savedSource,
-    savedConfig?.baseUrl ?? TTS_SOURCE_DEFAULTS[savedSource].baseUrl,
-    savedConfig?.enabled ?? false,
-    savedConfig?.model,
+    source,
+    baseUrl || TTS_SOURCE_DEFAULTS[source].baseUrl,
+    expanded,
+    model,
   );
 
   // Populate draft from server on load

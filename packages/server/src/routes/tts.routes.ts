@@ -546,7 +546,7 @@ async function fetchElevenLabsVoiceOptions(
   return voiceOptions;
 }
 
-async function fetchNanoGptModels(cfg: TTSConfig): Promise<string[]> {
+async function fetchNanoGptAudioModels(cfg: TTSConfig): Promise<any[]> {
   if (!cfg.apiKey) return [];
   const base = configuredBaseUrl(cfg);
   const root = nanoGptApiRoot(base);
@@ -566,12 +566,17 @@ async function fetchNanoGptModels(cfg: TTSConfig): Promise<string[]> {
     if (!res.ok) return [];
     const json = await res.json() as any;
     if (json && Array.isArray(json.data)) {
-      return json.data.map((m: any) => m.id).filter(Boolean);
+      return json.data;
     }
   } catch (err) {
-    // Fail silently, fallback is used
+    // Fail silently
   }
   return [];
+}
+
+async function fetchNanoGptModels(cfg: TTSConfig): Promise<string[]> {
+  const models = await fetchNanoGptAudioModels(cfg);
+  return models.map((m: any) => m.id).filter(Boolean);
 }
 
 async function fetchProviderVoices(cfg: TTSConfig): Promise<TTSVoicesResponse> {
@@ -584,10 +589,41 @@ async function fetchProviderVoices(cfg: TTSConfig): Promise<TTSVoicesResponse> {
   }
 
   if (cfg.source === "nanogpts") {
-    const models = await fetchNanoGptModels(cfg);
-    const fallbackRes = fallbackVoices(cfg.source, cfg.model);
+    const allModels = await fetchNanoGptAudioModels(cfg);
+    const models = allModels.map((m: any) => m.id).filter(Boolean);
+
+    // Find the currently selected model's details
+    const selectedModel = (cfg.model || "Kokoro-82m").trim();
+    const resolvedModel = normalizeNanoGptTtsModelId(selectedModel);
+    const modelEntry = allModels.find(
+      (m: any) => m.id && m.id.toLowerCase() === resolvedModel.toLowerCase(),
+    );
+
+    let voiceOptions: VoiceOption[] = [];
+    let fromProvider = false;
+
+    if (modelEntry && modelEntry.supported_parameters && Array.isArray(modelEntry.supported_parameters.voices)) {
+      const voicesList = modelEntry.supported_parameters.voices as string[];
+      voiceOptions = voicesList.map((v) => ({
+        id: v,
+        name: v,
+        category: `NanoGPT ${modelEntry.name || modelEntry.id}`,
+      }));
+      fromProvider = true;
+    }
+
+    // Fallback if no voices could be loaded from API
+    if (voiceOptions.length === 0) {
+      const fallbackRes = fallbackVoices(cfg.source, cfg.model);
+      voiceOptions = fallbackRes.voiceOptions || [];
+      fromProvider = fallbackRes.fromProvider;
+    }
+
     return {
-      ...fallbackRes,
+      voices: voiceOptions.map((v) => v.id),
+      voiceOptions,
+      fromProvider,
+      source: cfg.source,
       models: models.length > 0 ? models : undefined,
     };
   }
@@ -669,8 +705,17 @@ export async function ttsRoutes(app: FastifyInstance) {
    * GET /api/tts/voices
    * Fetches available voices from the configured provider.
    */
-  app.get("/voices", async () => {
+  app.get("/voices", async (req) => {
+    const query = req.query as Record<string, string>;
     const cfg = await loadConfig(storage);
+
+    if (query.source) cfg.source = query.source as TTSSource;
+    if (query.baseUrl) cfg.baseUrl = query.baseUrl;
+    if (query.model) cfg.model = query.model;
+
+    // Force enabled to true so that fetchProviderVoices attempts to contact the provider
+    // for this request, regardless of whether TTS is globally enabled in the database.
+    cfg.enabled = true;
 
     try {
       return await fetchProviderVoices(cfg);
