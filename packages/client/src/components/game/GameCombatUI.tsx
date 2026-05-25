@@ -845,7 +845,7 @@ export function GameCombatUI({
       if (!voicedCombatSpeakerSet.has(normalizeTTSCharacterName(line.character))) continue;
 
       const voice = resolveTTSVoiceForSpeaker(ttsConfig, line.character);
-      if (ttsConfig.source === "elevenlabs" && !voice) continue;
+      if ((ttsConfig.source === "elevenlabs" || ttsConfig.source === "nanogpts") && !voice) continue;
 
       const chunks = splitTTSChunks(line.content);
       if (chunks.length === 0) continue;

@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import { z } from "zod";
 
-export const ttsSourceSchema = z.enum(["openai", "elevenlabs", "pockettts"]);
+export const ttsSourceSchema = z.enum(["openai", "elevenlabs", "pockettts", "nanogpts"]);
 export type TTSSource = z.infer<typeof ttsSourceSchema>;
 
 export const ttsAudioFormatSchema = z.enum(["mp3", "wav"]);
@@ -149,4 +149,5 @@ export interface TTSVoicesResponse {
   /** True when the list came from the provider; false = local fallback or no provider voices */
   fromProvider: boolean;
   source: TTSSource;
+  models?: string[];
 }

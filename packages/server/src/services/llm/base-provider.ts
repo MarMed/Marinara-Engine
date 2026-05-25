@@ -606,7 +606,7 @@ export abstract class BaseLLMProvider {
       Authorization: `Bearer ${this.apiKey}`,
     };
     if (this.baseUrl.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = "https://github.com/Pasta-Devs/Marinara-Engine";
+      headers["HTTP-Referer"] = "https://github.com/MarMed/Marinara-Engine";
       headers["X-Title"] = "Marinara Engine";
     }
     const res = await llmFetch(`${this.baseUrl}/embeddings`, {
