@@ -32,6 +32,10 @@ const TTS_SOURCE_DEFAULTS: Record<TTSSource, { baseUrl: string; model: string }>
     baseUrl: "http://localhost:8000",
     model: "pocket-tts",
   },
+  nanogpts: {
+    baseUrl: "https://nano-gpt.com/api/v1",
+    model: "Kokoro-82m",
+  },
 };
 
 const ELEVENLABS_NON_TTS_MODELS = new Set(["eleven_ttv_v3", "eleven_multilingual_ttv_v2"]);
@@ -142,7 +146,58 @@ function responseFromVoiceOptions(
   };
 }
 
-function fallbackVoices(source: TTSSource): TTSVoicesResponse {
+const KOKORO_VOICES = [
+  // American English (Female)
+  { id: "af_heart", name: "af_heart (US Female - Heart)", category: "Kokoro US Female" },
+  { id: "af_alloy", name: "af_alloy (US Female - Alloy)", category: "Kokoro US Female" },
+  { id: "af_bella", name: "af_bella (US Female - Bella)", category: "Kokoro US Female" },
+  { id: "af_nicole", name: "af_nicole (US Female - Nicole)", category: "Kokoro US Female" },
+  { id: "af_sarah", name: "af_sarah (US Female - Sarah)", category: "Kokoro US Female" },
+  { id: "af_sky", name: "af_sky (US Female - Sky)", category: "Kokoro US Female" },
+  { id: "af_aoede", name: "af_aoede (US Female - Aoede)", category: "Kokoro US Female" },
+  { id: "af_jessica", name: "af_jessica (US Female - Jessica)", category: "Kokoro US Female" },
+  { id: "af_kore", name: "af_kore (US Female - Kore)", category: "Kokoro US Female" },
+  { id: "af_nova", name: "af_nova (US Female - Nova)", category: "Kokoro US Female" },
+  { id: "af_river", name: "af_river (US Female - River)", category: "Kokoro US Female" },
+
+  // American English (Male)
+  { id: "am_adam", name: "am_adam (US Male - Adam)", category: "Kokoro US Male" },
+  { id: "am_michael", name: "am_michael (US Male - Michael)", category: "Kokoro US Male" },
+  { id: "am_echo", name: "am_echo (US Male - Echo)", category: "Kokoro US Male" },
+  { id: "am_eric", name: "am_eric (US Male - Eric)", category: "Kokoro US Male" },
+  { id: "am_fenrir", name: "am_fenrir (US Male - Fenrir)", category: "Kokoro US Male" },
+  { id: "am_liam", name: "am_liam (US Male - Liam)", category: "Kokoro US Male" },
+  { id: "am_onyx", name: "am_onyx (US Male - Onyx)", category: "Kokoro US Male" },
+  { id: "am_puck", name: "am_puck (US Male - Puck)", category: "Kokoro US Male" },
+  { id: "am_santa", name: "am_santa (US Male - Santa)", category: "Kokoro US Male" },
+
+  // British English (Female)
+  { id: "bf_emma", name: "bf_emma (UK Female - Emma)", category: "Kokoro UK Female" },
+  { id: "bf_isabella", name: "bf_isabella (UK Female - Isabella)", category: "Kokoro UK Female" },
+  { id: "bf_alice", name: "bf_alice (UK Female - Alice)", category: "Kokoro UK Female" },
+  { id: "bf_lily", name: "bf_lily (UK Female - Lily)", category: "Kokoro UK Female" },
+
+  // British English (Male)
+  { id: "bm_george", name: "bm_george (UK Male - George)", category: "Kokoro UK Male" },
+  { id: "bm_lewis", name: "bm_lewis (UK Male - Lewis)", category: "Kokoro UK Male" },
+  { id: "bm_daniel", name: "bm_daniel (UK Male - Daniel)", category: "Kokoro UK Male" },
+  { id: "bm_fable", name: "bm_fable (UK Male - Fable)", category: "Kokoro UK Male" },
+
+  // Other languages
+  { id: "jf_alpha", name: "jf_alpha (Japanese Female)", category: "Kokoro Japanese" },
+  { id: "jm_kumo", name: "jm_kumo (Japanese Male)", category: "Kokoro Japanese" },
+  { id: "zf_xiaobei", name: "zf_xiaobei (Chinese Female)", category: "Kokoro Chinese" },
+  { id: "zm_yunjian", name: "zm_yunjian (Chinese Male)", category: "Kokoro Chinese" },
+  { id: "ef_dora", name: "ef_dora (Spanish Female)", category: "Kokoro Spanish" },
+  { id: "em_alex", name: "em_alex (Spanish Male)", category: "Kokoro Spanish" },
+  { id: "ff_siwis", name: "ff_siwis (French Female)", category: "Kokoro French" },
+  { id: "hf_alpha", name: "hf_alpha (Hindi Female)", category: "Kokoro Hindi" },
+  { id: "hm_omega", name: "hm_omega (Hindi Male)", category: "Kokoro Hindi" },
+  { id: "if_sara", name: "if_sara (Italian Female)", category: "Kokoro Italian" },
+  { id: "pf_dora", name: "pf_dora (Portuguese Female)", category: "Kokoro Portuguese" }
+];
+
+function fallbackVoices(source: TTSSource, model?: string): TTSVoicesResponse {
   if (source === "elevenlabs") {
     return responseFromVoiceOptions(source, [], false);
   }
@@ -174,6 +229,30 @@ function fallbackVoices(source: TTSSource): TTSVoicesResponse {
     return responseFromVoiceOptions(
       source,
       voices.map((voice) => ({ id: voice, name: voice, category: "PocketTTS built-in" })),
+      false,
+    );
+  }
+
+  if (source === "nanogpts") {
+    const lowerModel = (model || "").toLowerCase();
+    if (lowerModel.includes("elevenlabs") || lowerModel.includes("eleven_")) {
+      return responseFromVoiceOptions(
+        source,
+        NANOGPT_ELEVENLABS_VOICES.map((voice) => ({ id: voice, name: voice, category: "NanoGPT ElevenLabs" })),
+        false,
+      );
+    }
+    if (lowerModel.includes("tts-1") || lowerModel.includes("gpt-4o")) {
+      return responseFromVoiceOptions(
+        source,
+        OPENAI_FALLBACK_VOICES.map((voice) => ({ id: voice, name: voice, category: "NanoGPT OpenAI" })),
+        false,
+      );
+    }
+    // Default to Kokoro
+    return responseFromVoiceOptions(
+      source,
+      KOKORO_VOICES,
       false,
     );
   }
@@ -467,13 +546,50 @@ async function fetchElevenLabsVoiceOptions(
   return voiceOptions;
 }
 
+async function fetchNanoGptModels(cfg: TTSConfig): Promise<string[]> {
+  if (!cfg.apiKey) return [];
+  const base = configuredBaseUrl(cfg);
+  const root = nanoGptApiRoot(base);
+  const url = `${root}/v1/audio-models`;
+
+  try {
+    const res = await safeFetch(url, {
+      headers: nanoGptHeaders(cfg.apiKey),
+      signal: AbortSignal.timeout(10_000),
+      policy: {
+        allowLocal: allowLocalTtsUrl(cfg),
+        allowedProtocols: ["https:", "http:"],
+        flagName: "TTS_LOCAL_URLS_ENABLED",
+      },
+      maxResponseBytes: 1 * 1024 * 1024,
+    });
+    if (!res.ok) return [];
+    const json = await res.json() as any;
+    if (json && Array.isArray(json.data)) {
+      return json.data.map((m: any) => m.id).filter(Boolean);
+    }
+  } catch (err) {
+    // Fail silently, fallback is used
+  }
+  return [];
+}
+
 async function fetchProviderVoices(cfg: TTSConfig): Promise<TTSVoicesResponse> {
-  if (!cfg.enabled) return fallbackVoices(cfg.source);
+  if (!cfg.enabled) return fallbackVoices(cfg.source, cfg.model);
 
   const base = configuredBaseUrl(cfg);
 
   if (cfg.source === "pockettts") {
-    return fallbackVoices(cfg.source);
+    return fallbackVoices(cfg.source, cfg.model);
+  }
+
+  if (cfg.source === "nanogpts") {
+    const models = await fetchNanoGptModels(cfg);
+    const fallbackRes = fallbackVoices(cfg.source, cfg.model);
+    return {
+      ...fallbackRes,
+      models: models.length > 0 ? models : undefined,
+    };
   }
 
   if (cfg.source === "elevenlabs") {
@@ -559,7 +675,7 @@ export async function ttsRoutes(app: FastifyInstance) {
     try {
       return await fetchProviderVoices(cfg);
     } catch {
-      return fallbackVoices(cfg.source);
+      return fallbackVoices(cfg.source, cfg.model);
     }
   });
 
@@ -587,7 +703,7 @@ export async function ttsRoutes(app: FastifyInstance) {
     }
 
     const base = configuredBaseUrl(cfg);
-    const useNanoGptSpeech = isNanoGptBaseUrl(base);
+    const useNanoGptSpeech = cfg.source === "nanogpts" || isNanoGptBaseUrl(base);
     const usePocketTtsSpeech = cfg.source === "pockettts";
     const configuredModel = (cfg.model || TTS_SOURCE_DEFAULTS[cfg.source].model).trim();
     const model = useNanoGptSpeech

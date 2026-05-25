@@ -764,7 +764,7 @@ function getGameSegmentVoiceRequest(
       undefined,
       findNpcVoiceHint(segment.speaker, gameNpcs),
     );
-    if (config.source === "elevenlabs" && !voice) return null;
+    if ((config.source === "elevenlabs" || config.source === "nanogpts") && !voice) return null;
     return {
       chunks,
       speaker: segment.speaker,
@@ -777,7 +777,7 @@ function getGameSegmentVoiceRequest(
   const chunks = splitTTSChunks(segment.content);
   if (chunks.length === 0) return null;
   const voice = resolveTTSNarratorVoice(config);
-  if (config.source === "elevenlabs" && !voice) return null;
+  if ((config.source === "elevenlabs" || config.source === "nanogpts") && !voice) return null;
   return { chunks, voice };
 }
 

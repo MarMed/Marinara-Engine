@@ -8,7 +8,7 @@ import { TTS_API_KEY_MASK } from "@marinara-engine/shared";
 
 const KEYS = {
   config: ["tts", "config"] as const,
-  voices: (source: TTSSource, baseUrl: string) => ["tts", "voices", source, baseUrl] as const,
+  voices: (source: TTSSource, baseUrl: string, model?: string) => ["tts", "voices", source, baseUrl, model] as const,
 };
 
 // ── Config ───────────────────────────────────────
@@ -34,9 +34,9 @@ export function useUpdateTTSConfig() {
 
 // ── Voices ───────────────────────────────────────
 
-export function useTTSVoices(source: TTSSource, baseUrl: string, enabled: boolean) {
+export function useTTSVoices(source: TTSSource, baseUrl: string, enabled: boolean, model?: string) {
   return useQuery({
-    queryKey: KEYS.voices(source, baseUrl),
+    queryKey: KEYS.voices(source, baseUrl, model),
     queryFn: () => api.get<TTSVoicesResponse>("/tts/voices"),
     enabled: enabled && Boolean(baseUrl),
     staleTime: 5 * 60_000,

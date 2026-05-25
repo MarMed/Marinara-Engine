@@ -68,12 +68,29 @@ const TTS_SOURCE_DEFAULTS: Record<
     voice: "alba",
     idleText: "Local PocketTTS",
   },
+  nanogpts: {
+    label: "NanoGPT",
+    baseUrl: "https://nano-gpt.com/api/v1",
+    model: "Kokoro-82m",
+    voice: "af_heart",
+    idleText: "NanoGPT TTS",
+  },
 };
 
 const TTS_SOURCE_OPTIONS: Array<{ value: TTSSource; label: string }> = [
   { value: "openai", label: "OpenAI-compatible" },
   { value: "elevenlabs", label: "ElevenLabs" },
   { value: "pockettts", label: "PocketTTS" },
+  { value: "nanogpts", label: "NanoGPT" },
+];
+
+const NANOGPT_TTS_MODELS = [
+  "Kokoro-82m",
+  "Elevenlabs-Turbo-V2.5",
+  "Elevenlabs-V3",
+  "tts-1",
+  "tts-1-hd",
+  "gpt-4o-mini-tts",
 ];
 
 const ELEVENLABS_TTS_MODELS = [
@@ -197,6 +214,12 @@ function readVoiceMetadata(option: VoiceOption): string {
 }
 
 function inferVoiceOptionGender(option: VoiceOption): "male" | "female" | null {
+  if (option.id.startsWith("af_") || option.id.startsWith("bf_") || option.id.startsWith("jf_") || option.id.startsWith("zf_") || option.id.startsWith("ef_") || option.id.startsWith("ff_") || option.id.startsWith("hf_") || option.id.startsWith("if_") || option.id.startsWith("pf_")) {
+    return "female";
+  }
+  if (option.id.startsWith("am_") || option.id.startsWith("bm_") || option.id.startsWith("jm_") || option.id.startsWith("zm_") || option.id.startsWith("em_") || option.id.startsWith("hm_")) {
+    return "male";
+  }
   const metadata = normalizeVoiceName(readVoiceMetadata(option));
   if (/\b(female|feminine|woman|girl|lady)\b/.test(metadata)) return "female";
   if (/\b(male|masculine|man|boy|gentleman)\b/.test(metadata)) return "male";
@@ -325,6 +348,7 @@ export function TTSConfigCard() {
     savedSource,
     savedConfig?.baseUrl ?? TTS_SOURCE_DEFAULTS[savedSource].baseUrl,
     savedConfig?.enabled ?? false,
+    savedConfig?.model,
   );
 
   // Populate draft from server on load
@@ -473,8 +497,8 @@ export function TTSConfigCard() {
         payload.voiceMode === "per-character"
           ? (payload.voiceAssignments.find((assignment) => assignment.voice)?.voice ?? payload.voice)
           : payload.voice;
-      if (payload.source === "elevenlabs" && !previewVoice) {
-        toast.error("Select an ElevenLabs voice before previewing.");
+      if ((payload.source === "elevenlabs" || payload.source === "nanogpts") && !previewVoice) {
+        toast.error(`Select a ${payload.source === "elevenlabs" ? "ElevenLabs" : "NanoGPT"} voice before previewing.`);
         return;
       }
 
@@ -500,6 +524,7 @@ export function TTSConfigCard() {
   const voices = voicesData?.voices ?? [];
   const voiceOptions = voicesData?.voiceOptions ?? voices.map((v) => ({ id: v, name: v }));
   const voicesFromProvider = voicesData?.fromProvider ?? false;
+  const dynamicNanoGptModels = voicesData?.models ?? [];
   const elevenLabsMatchedMaleVoiceOptions = useMemo(
     () =>
       voiceOptions.filter((option) => isElevenLabsVoiceForGender(option, "male", ELEVENLABS_DEFAULT_MALE_VOICE_NAMES)),
@@ -556,17 +581,17 @@ export function TTSConfigCard() {
   const selectedVoiceLabel =
     voiceMode === "per-character"
       ? `Per character${customVoiceCount > 0 ? ` · ${customVoiceCount} custom` : ""}`
-      : voice || (source === "elevenlabs" ? "No voice selected" : selectedSource.voice);
-  const narratorVoiceLabel = narratorVoice || (source === "elevenlabs" ? "No narrator voice selected" : voice);
+      : voice || ((source === "elevenlabs" || source === "nanogpts") ? "No voice selected" : selectedSource.voice);
+  const narratorVoiceLabel = narratorVoice || ((source === "elevenlabs" || source === "nanogpts") ? "No narrator voice selected" : voice);
   const previewVoice =
     voiceMode === "per-character" ? (voiceAssignments.find((assignment) => assignment.voice)?.voice ?? voice) : voice;
   const selectedLanguage =
     ELEVENLABS_TTS_LANGUAGE_OPTIONS.find((option) => option.code === elevenLabsLanguageCode) ??
     ELEVENLABS_TTS_LANGUAGE_OPTIONS[0];
-  const previewDisabled = !enabled || ttsState === "loading" || (source === "elevenlabs" && !previewVoice);
+  const previewDisabled = !enabled || ttsState === "loading" || ((source === "elevenlabs" || source === "nanogpts") && !previewVoice);
   const previewTitle =
-    source === "elevenlabs" && !previewVoice
-      ? "Select an ElevenLabs voice first"
+    (source === "elevenlabs" || source === "nanogpts") && !previewVoice
+      ? `Select a ${source === "elevenlabs" ? "ElevenLabs" : "NanoGPT"} voice first`
       : !enabled
         ? "Enable TTS first"
         : ttsState === "playing"
@@ -737,9 +762,11 @@ export function TTSConfigCard() {
             help={
               source === "elevenlabs"
                 ? "The ElevenLabs API root. Use the default unless you proxy ElevenLabs through another server."
-                : source === "pockettts"
-                  ? "The PocketTTS server root. Start it with pocket-tts serve, then use http://localhost:8000 unless you changed the port."
-                  : "The OpenAI-compatible TTS API endpoint. Use the default for OpenAI or point to a self-hosted server."
+                : source === "nanogpts"
+                  ? "The NanoGPT API root. Use the default unless you proxy NanoGPT through another server."
+                  : source === "pockettts"
+                    ? "The PocketTTS server root. Start it with pocket-tts serve, then use http://localhost:8000 unless you changed the port."
+                    : "The OpenAI-compatible TTS API endpoint. Use the default for OpenAI or point to a self-hosted server."
             }
           >
             <div className="relative">
@@ -785,14 +812,22 @@ export function TTSConfigCard() {
             help={
               source === "elevenlabs"
                 ? "ElevenLabs model_id to use. Use eleven_v3 for Eleven v3 speech; eleven_ttv_v3 is a voice-design model and cannot generate TTS."
-                : source === "pockettts"
-                  ? "PocketTTS selects its language/model when you start the local server. This field is kept for clarity and future compatible servers."
-                  : "TTS model to use. e.g. tts-1, tts-1-hd, gpt-4o-mini-tts, or any model your provider supports."
+                : source === "nanogpts"
+                  ? "NanoGPT model to use. e.g. Kokoro-82m, Elevenlabs-Turbo-V2.5, Elevenlabs-V3, tts-1, tts-1-hd, gpt-4o-mini-tts."
+                  : source === "pockettts"
+                    ? "PocketTTS selects its language/model when you start the local server. This field is kept for clarity and future compatible servers."
+                    : "TTS model to use. e.g. tts-1, tts-1-hd, gpt-4o-mini-tts, or any model your provider supports."
             }
           >
             <input
               value={model}
-              list={source === "elevenlabs" ? "elevenlabs-tts-models" : undefined}
+              list={
+                source === "elevenlabs"
+                  ? "elevenlabs-tts-models"
+                  : source === "nanogpts"
+                    ? "nanogpts-tts-models"
+                    : undefined
+              }
               onChange={(e) => {
                 setModel(e.target.value);
                 mark({ model: e.target.value });
@@ -811,6 +846,20 @@ export function TTSConfigCard() {
                   Eleven v3 speech uses <code className="font-mono">eleven_v3</code>. IDs containing{" "}
                   <code className="font-mono">ttv</code> are Text to Voice / voice design models. NanoGPT proxies use{" "}
                   <code className="font-mono">Elevenlabs-V3</code>.
+                </p>
+              </>
+            )}
+            {source === "nanogpts" && (
+              <>
+                <datalist id="nanogpts-tts-models">
+                  {(dynamicNanoGptModels.length > 0 ? dynamicNanoGptModels : NANOGPT_TTS_MODELS).map((modelId) => (
+                    <option key={modelId} value={modelId} />
+                  ))}
+                </datalist>
+                <p className="text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
+                  Supported models include <code className="font-mono">Kokoro-82m</code>,{" "}
+                  <code className="font-mono">Elevenlabs-Turbo-V2.5</code>, <code className="font-mono">Elevenlabs-V3</code>,{" "}
+                  and OpenAI models like <code className="font-mono">tts-1</code>.
                 </p>
               </>
             )}
@@ -841,9 +890,11 @@ export function TTSConfigCard() {
               help={
                 source === "elevenlabs"
                   ? "ElevenLabs voices are fetched by name and saved by voice ID."
-                  : source === "pockettts"
-                    ? "PocketTTS built-in voice name or a voice URL/path accepted by your PocketTTS server."
-                    : "Voice to use for synthesis. Fetched from your configured provider when available."
+                  : source === "nanogpts"
+                    ? "NanoGPT voices are mapped to your selected model."
+                    : source === "pockettts"
+                      ? "PocketTTS built-in voice name or a voice URL/path accepted by your PocketTTS server."
+                      : "Voice to use for synthesis. Fetched from your configured provider when available."
               }
             >
               <div className="flex gap-2">
@@ -876,10 +927,11 @@ export function TTSConfigCard() {
                     className={cn(INPUT_CLS, "flex-1 cursor-pointer appearance-none")}
                   >
                     {source === "elevenlabs" && <option value="">Select an ElevenLabs voice</option>}
+                    {source === "nanogpts" && <option value="">Select a NanoGPT voice</option>}
                     {fetchingVoices && <option value="">Loading voices…</option>}
                     {!fetchingVoices && voiceOptions.length === 0 && !voicesError && (
                       <option value="">
-                        {source === "elevenlabs"
+                        {source === "elevenlabs" || source === "nanogpts"
                           ? "Enter API key, save, then refresh voices"
                           : "Save config to load voices"}
                       </option>
@@ -906,9 +958,9 @@ export function TTSConfigCard() {
                   Showing OpenAI built-in voices — save & enable to load from your provider
                 </p>
               )}
-              {!voicesFromProvider && source === "elevenlabs" && !fetchingVoices && (
+              {!voicesFromProvider && (source === "elevenlabs" || source === "nanogpts") && !fetchingVoices && (
                 <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                  ElevenLabs voices load after the connection is saved with an API key
+                  {source === "elevenlabs" ? "ElevenLabs" : "NanoGPT"} voices load after the connection is saved with an API key
                 </p>
               )}
               {!voicesFromProvider && source === "pockettts" && voices.length > 0 && (
@@ -959,7 +1011,7 @@ export function TTSConfigCard() {
                       disabled={fetchingVoices || voiceOptions.length === 0}
                       className={cn(INPUT_CLS, "cursor-pointer appearance-none py-2 text-xs")}
                     >
-                      {source === "elevenlabs" && <option value="">Select voice</option>}
+                      {(source === "elevenlabs" || source === "nanogpts") && <option value="">Select voice</option>}
                       {voiceOptions.map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.name === option.id ? option.id : `${option.name} (${option.id})`}
@@ -1029,10 +1081,11 @@ export function TTSConfigCard() {
                       className={cn(INPUT_CLS, "min-w-0 flex-1 cursor-pointer appearance-none")}
                     >
                       {source === "elevenlabs" && <option value="">Select narrator voice</option>}
+                      {source === "nanogpts" && <option value="">Select narrator voice</option>}
                       {fetchingVoices && <option value="">Loading voices…</option>}
                       {!fetchingVoices && voiceOptions.length === 0 && !voicesError && (
                         <option value="">
-                          {source === "elevenlabs"
+                          {source === "elevenlabs" || source === "nanogpts"
                             ? "Enter API key, save, then refresh voices"
                             : "Save config to load voices"}
                         </option>
@@ -1056,7 +1109,7 @@ export function TTSConfigCard() {
                   </button>
                 </div>
               )}
-              {narratorVoiceEnabled && source === "elevenlabs" && !narratorVoice && (
+              {narratorVoiceEnabled && (source === "elevenlabs" || source === "nanogpts") && !narratorVoice && (
                 <p className="text-[0.625rem] leading-relaxed text-amber-300/80">
                   Select a narrator voice, or narration will fall back only when a global voice is available.
                 </p>
@@ -1064,7 +1117,7 @@ export function TTSConfigCard() {
             </div>
           </FieldRow>
 
-          {source !== "elevenlabs" && (
+          {source !== "elevenlabs" && source !== "nanogpts" && (
             <FieldRow
               label="Audio Format"
               help="Output audio format. WAV are useful for local/self-hosted TTS servers that do not support MP3."
@@ -1084,7 +1137,7 @@ export function TTSConfigCard() {
             </FieldRow>
           )}
 
-          {source === "elevenlabs" && (
+          {(source === "elevenlabs" || source === "nanogpts") && (
             <FieldRow
               label="Random NPC Voices"
               help="When enabled, tracked game NPCs without a character-specific voice use a stable random ElevenLabs default voice matched to inferred male/female presentation."
@@ -1116,7 +1169,7 @@ export function TTSConfigCard() {
                     </p>
                     {!voicesFromProvider && (
                       <p className="text-[0.625rem] leading-relaxed text-amber-300/80">
-                        Save the ElevenLabs connection and refresh voices to load the provider's default voice list.
+                        Save the connection and refresh voices to load the provider's default voice list.
                       </p>
                     )}
                   </div>

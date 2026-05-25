@@ -153,7 +153,7 @@ function resolveNpcDefaultVoice(
   >,
   npcHint?: TTSNpcVoiceHint | null,
 ): string {
-  if (config.source !== "elevenlabs" || !config.npcDefaultVoicesEnabled || !npcHint) return "";
+  if ((config.source !== "elevenlabs" && config.source !== "nanogpts") || !config.npcDefaultVoicesEnabled || !npcHint) return "";
 
   const maleVoices = (config.npcDefaultMaleVoices ?? []).filter(Boolean);
   const femaleVoices = (config.npcDefaultFemaleVoices ?? []).filter(Boolean);
@@ -222,7 +222,7 @@ export function resolveTTSVoiceForSpeaker(
 
   const npcDefaultVoice = resolveNpcDefaultVoice(config, npcHint);
   if (npcDefaultVoice) return npcDefaultVoice;
-  if (config.source === "elevenlabs" && config.npcDefaultVoicesEnabled && npcHint) return "";
+  if ((config.source === "elevenlabs" || config.source === "nanogpts") && config.npcDefaultVoicesEnabled && npcHint) return "";
   return fallbackVoice;
 }
 
@@ -354,7 +354,7 @@ export function buildTTSVoiceRequests(
         (speakerKey && speakerKey === fallbackSpeakerKey ? fallbackCharacterId : undefined))
       : fallbackCharacterId;
     const voice = resolveTTSVoiceForSpeaker(config, speaker, resolvedCharacterId);
-    if (config.source === "elevenlabs" && !voice) return [];
+    if ((config.source === "elevenlabs" || config.source === "nanogpts") && !voice) return [];
 
     return splitTTSChunks(utterance.text).map((chunk) => ({
       text: chunk,
