@@ -851,6 +851,159 @@ export async function ttsRoutes(app: FastifyInstance) {
     }
 
     const contentType = providerRes.headers.get("content-type");
+    const isJson = contentType && contentType.toLowerCase().includes("application/json");
+    const is202 = providerRes.status === 202;
+
+    if (useNanoGptSpeech && (isJson || is202)) {
+      const bodyText = await providerRes.text().catch(() => "");
+      let ticket: any;
+      try {
+        ticket = JSON.parse(bodyText);
+      } catch (err) {
+        return reply.status(502).send({
+          error: "TTS provider returned invalid JSON response",
+          detail: bodyText.slice(0, 500),
+        });
+      }
+
+      // Case A: Asynchronous Model (HTTP 202 or status pending)
+      if (is202 || ticket.status === "pending" || ticket.runId) {
+        const runId = ticket.runId;
+        const ticketModel = ticket.model || model;
+        if (!runId) {
+          return reply.status(502).send({
+            error: "TTS provider returned pending status but no runId",
+            detail: JSON.stringify(ticket),
+          });
+        }
+
+        // Build polling parameters for GET /api/tts/status
+        const pollParams = new URLSearchParams();
+        pollParams.set("runId", runId);
+        pollParams.set("model", ticketModel);
+        if (ticket.cost !== undefined) pollParams.set("cost", String(ticket.cost));
+        if (ticket.paymentSource) pollParams.set("paymentSource", ticket.paymentSource);
+        if (ticket.isApiRequest !== undefined) pollParams.set("isApiRequest", String(ticket.isApiRequest));
+
+        const root = nanoGptApiRoot(base);
+        const statusUrl = isNanoGptBaseUrl(base)
+          ? `https://nano-gpt.com/api/tts/status?${pollParams.toString()}`
+          : `${root}/tts/status?${pollParams.toString()}`;
+
+        // Poll every 2.5 seconds up to 3 minutes (72 attempts)
+        let completed = false;
+        let audioUrl = "";
+        let finalContentType = audioFormatMimeType(audioFormat);
+        const maxAttempts = 72;
+        const delayMs = 2500;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+          try {
+            const statusRes = await safeFetch(statusUrl, {
+              headers: nanoGptHeaders(cfg.apiKey),
+              signal: AbortSignal.timeout(10_000),
+              policy: {
+                allowLocal: allowLocalTtsUrl(cfg),
+                allowedProtocols: ["https:", "http:"],
+                flagName: "TTS_LOCAL_URLS_ENABLED",
+              },
+              maxResponseBytes: 1 * 1024 * 1024,
+            });
+
+            if (statusRes.ok) {
+              const statusJson = await statusRes.json() as any;
+              if (statusJson.status === "completed") {
+                completed = true;
+                audioUrl = statusJson.audioUrl;
+                if (statusJson.contentType) {
+                  finalContentType = statusJson.contentType;
+                }
+                break;
+              } else if (statusJson.status === "failed" || statusJson.status === "error") {
+                return reply.status(502).send({
+                  error: "TTS asynchronous generation failed on provider side",
+                  detail: JSON.stringify(statusJson),
+                });
+              }
+            }
+          } catch (err) {
+            req.log.warn(err, `TTS polling attempt ${attempt} failed`);
+          }
+        }
+
+        if (!completed || !audioUrl) {
+          return reply.status(504).send({
+            error: "TTS asynchronous generation timed out on provider side",
+          });
+        }
+
+        // Fetch completed audio
+        try {
+          const audioRes = await safeFetch(audioUrl, {
+            signal: AbortSignal.timeout(30_000),
+            policy: {
+              allowLocal: allowLocalTtsUrl(cfg),
+              allowedProtocols: ["https:", "http:"],
+              flagName: "TTS_LOCAL_URLS_ENABLED",
+            },
+            maxResponseBytes: MAX_TTS_AUDIO_BYTES,
+          });
+
+          if (!audioRes.ok) {
+            return reply.status(502).send({
+              error: `Failed to fetch completed TTS audio from provider URL (${audioRes.status})`,
+            });
+          }
+
+          const audioBuffer = await audioRes.arrayBuffer();
+          reply.header("Content-Type", finalContentType);
+          reply.header("Content-Length", String(audioBuffer.byteLength));
+          return reply.send(Buffer.from(audioBuffer));
+        } catch (err) {
+          req.log.error(err, "Failed to fetch final async TTS audio file");
+          return reply.status(502).send({
+            error: "Failed to download generated TTS audio file from provider storage",
+          });
+        }
+      }
+
+      // Case B: Synchronous Model returning JSON containing { audioUrl, contentType }
+      if (ticket.audioUrl) {
+        const audioUrl = ticket.audioUrl;
+        const finalContentType = ticket.contentType || audioFormatMimeType(audioFormat);
+
+        try {
+          const audioRes = await safeFetch(audioUrl, {
+            signal: AbortSignal.timeout(30_000),
+            policy: {
+              allowLocal: allowLocalTtsUrl(cfg),
+              allowedProtocols: ["https:", "http:"],
+              flagName: "TTS_LOCAL_URLS_ENABLED",
+            },
+            maxResponseBytes: MAX_TTS_AUDIO_BYTES,
+          });
+
+          if (!audioRes.ok) {
+            return reply.status(502).send({
+              error: `Failed to fetch synchronous TTS audio from provider URL (${audioRes.status})`,
+            });
+          }
+
+          const audioBuffer = await audioRes.arrayBuffer();
+          reply.header("Content-Type", finalContentType);
+          reply.header("Content-Length", String(audioBuffer.byteLength));
+          return reply.send(Buffer.from(audioBuffer));
+        } catch (err) {
+          req.log.error(err, "Failed to fetch synchronous JSON TTS audio file");
+          return reply.status(502).send({
+            error: "Failed to download synchronous TTS audio file from provider storage",
+          });
+        }
+      }
+    }
+
     if (!isAllowedTTSAudioContentType(contentType)) {
       const body = await providerRes.text().catch(() => "");
       return reply.status(502).send({
